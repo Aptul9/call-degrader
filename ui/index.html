@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>call-degrader</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>call-degrader</h1>
+  <div id="status" class="status">
+    <span class="pill" id="pill-state">live</span>
+    <span class="pill" id="pill-link">link off</span>
+    <span class="pill" id="pill-fps">0 fps</span>
+    <span class="pill" id="pill-vcam">no virtual camera</span>
+    <span class="pill" id="pill-audio">audio off</span>
+  </div>
+</header>
+
+<main>
+
+  <section class="stage">
+    <div class="preview">
+      <img id="preview" src="/preview.mjpg" alt="camera preview">
+      <div id="stall-flash" class="stall-flash"></div>
+    </div>
+
+    <div class="pedal">
+      <button id="btn-record" class="btn btn-rec">hold to record</button>
+      <button id="btn-live" class="btn">back to live</button>
+      <button id="btn-clear" class="btn btn-quiet">clear loop</button>
+    </div>
+    <p class="hint">
+      Hold the button or the record hotkey. The live feed keeps going out while you hold;
+      the loop starts when you let go.
+      <span id="hotkey-hint"></span>
+    </p>
+
+    <div class="meters">
+      <label>mic in<span class="meter"><i id="meter-in"></i></span></label>
+      <label>cable out<span class="meter"><i id="meter-out"></i></span></label>
+    </div>
+  </section>
+
+  <section class="controls">
+
+    <div class="presets" id="presets"></div>
+
+    <fieldset>
+      <legend>
+        the line
+        <label class="toggle"><input type="checkbox" data-path="link.enabled"><span>on</span></label>
+      </legend>
+      <div class="grid" id="group-link"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>video</legend>
+      <div class="grid" id="group-video"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>audio</legend>
+      <div class="grid" id="group-audio"></div>
+      <div class="row">
+        <button id="btn-route" class="btn btn-quiet">point system mic at CABLE Output</button>
+        <span id="route-result" class="note"></span>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>pedal</legend>
+      <div class="grid" id="group-pedal"></div>
+    </fieldset>
+
+    <p class="note" id="errors"></p>
+
+  </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
