@@ -12,10 +12,13 @@ own response, never the chain feeding the call.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import wave
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import numpy as np
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -107,6 +110,35 @@ def create_app(controller: Controller) -> FastAPI:
         except Exception as exc:
             return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
 
+    # -- audio A/B ------------------------------------------------------
+
+    @app.post("/api/audio-test/start")
+    def audio_test_start(payload: dict | None = None):
+        seconds = float((payload or {}).get("seconds", 5.0))
+        seconds = max(1.0, min(30.0, seconds))
+        if not controller.audio.status()["running"]:
+            return JSONResponse(status_code=400, content={
+                "ok": False, "error": "the audio chain is not running"})
+        return {"ok": True, **controller.audio.start_capture(seconds)}
+
+    @app.get("/api/audio-test/status")
+    def audio_test_status():
+        return controller.audio.capture_status()
+
+    @app.get("/api/audio-test/{side}.wav")
+    def audio_test_wav(side: str):
+        if side not in ("before", "after"):
+            raise HTTPException(status_code=404, detail="side must be before or after")
+        got = controller.audio.capture_audio(side)
+        if got is None:
+            raise HTTPException(status_code=409, detail="no finished recording")
+        samples, rate = got
+        return Response(
+            content=_wav_bytes(samples, rate),
+            media_type="audio/wav",
+            headers={"Cache-Control": "no-store"},
+        )
+
     # -- preview -------------------------------------------------------
 
     @app.get("/preview.mjpg")
@@ -130,6 +162,24 @@ def create_app(controller: Controller) -> FastAPI:
             log.debug("websocket closed: %s", exc)
 
     return app
+
+
+def _wav_bytes(samples: np.ndarray, rate: int) -> bytes:
+    """Mono 16-bit WAV, which every browser plays without a codec question.
+
+    Clipped rather than normalised: the whole point is to hear what the far end
+    hears, and normalising would quietly undo the level changes the degradation
+    made.
+    """
+    clipped = np.clip(samples, -1.0, 1.0)
+    pcm = (clipped * 32767.0).astype("<i2")
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(pcm.tobytes())
+    return buffer.getvalue()
 
 
 async def _frames(controller: Controller):

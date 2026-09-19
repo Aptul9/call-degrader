@@ -304,6 +304,58 @@ function wirePedal() {
   });
 }
 
+// -- audio A/B ------------------------------------------------------------
+
+// Both sides are captured inside the audio callback, so "before" is the raw
+// microphone and "after" is the exact block written to the cable. They will not
+// be sample-aligned when the line has latency or desync set: that delay is part
+// of what the far end gets, so it is left in rather than corrected for.
+function wireAudioTest() {
+  const btn = $('btn-audio-test');
+  const secs = $('audio-test-secs');
+  const note = $('audio-test-note');
+  const players = $('audio-test-players');
+
+  btn.addEventListener('click', async () => {
+    const seconds = parseFloat(secs.value);
+    btn.disabled = true;
+    note.classList.remove('bad');
+    players.hidden = true;
+
+    try {
+      const started = await send('/api/audio-test/start', { seconds });
+      if (started.ok === false) throw new Error(started.error);
+
+      for (let left = seconds; left > 0; left -= 1) {
+        note.textContent = `recording, ${Math.ceil(left)}s left - talk now`;
+        await new Promise((done) => setTimeout(done, 1000));
+      }
+      note.textContent = 'writing...';
+
+      // Poll rather than trust the countdown: the capture finishes on block
+      // count, and the audio callback is not on this clock.
+      for (let tries = 0; tries < 40; tries += 1) {
+        const state = await (await fetch('/api/audio-test/status')).json();
+        if (state.ready) break;
+        await new Promise((done) => setTimeout(done, 100));
+      }
+
+      // The query string is what makes the browser refetch rather than replay
+      // the previous recording from its cache.
+      const stamp = Date.now();
+      $('audio-before').src = `/api/audio-test/before.wav?t=${stamp}`;
+      $('audio-after').src = `/api/audio-test/after.wav?t=${stamp}`;
+      players.hidden = false;
+      note.textContent = `${seconds}s captured`;
+    } catch (err) {
+      note.textContent = err.message;
+      note.classList.add('bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 // -- live status ----------------------------------------------------------
 
 function wireStatus() {
@@ -365,6 +417,7 @@ function showError(message) {
   render();
   wireFolds();
   wirePedal();
+  wireAudioTest();
   wireStatus();
   $('hotkey-hint').textContent =
     `Hold ${settings.pedal.record_key} to record, ${settings.pedal.live_key} to go live. `

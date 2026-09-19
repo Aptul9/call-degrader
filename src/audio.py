@@ -119,6 +119,16 @@ class AudioPipeline:
         self._out_stream: sd.OutputStream | None = None
         self._lock = threading.Lock()
 
+        # A/B capture. Both sides are taken inside the input callback, where the
+        # raw block and the processed one are both already in hand. Recording
+        # the result off CABLE Output instead would mean opening a third device
+        # and would put the two recordings on different clocks.
+        self._tap_lock = threading.Lock()
+        self._tap_raw: list[np.ndarray] = []
+        self._tap_out: list[np.ndarray] = []
+        self._tap_left = 0  # blocks still to capture, 0 when idle
+        self._tap_ready = False
+
         self._status = {
             "running": False,
             "input": None,
@@ -237,7 +247,50 @@ class AudioPipeline:
             # growing a queue that turns into unbounded latency.
             pass
 
+        self._tap(block, out)
         self._set(level_in=round(level_in, 4), level_out=round(float(np.abs(out).max()), 4))
+
+    def _tap(self, raw: np.ndarray, processed: np.ndarray) -> None:
+        """Collect one block of each side while a test recording is running."""
+        with self._tap_lock:
+            if self._tap_left <= 0:
+                return
+            self._tap_raw.append(raw.copy())
+            self._tap_out.append(processed.copy())
+            self._tap_left -= 1
+            if self._tap_left == 0:
+                self._tap_ready = True
+
+    # -- A/B recording -------------------------------------------------
+
+    def start_capture(self, seconds: float) -> dict:
+        """Begin capturing both sides of the chain for `seconds`."""
+        cfg = self._store.get().audio
+        blocks = max(1, int(seconds * cfg.samplerate / max(1, cfg.blocksize)))
+        with self._tap_lock:
+            self._tap_raw, self._tap_out = [], []
+            self._tap_left = blocks
+            self._tap_ready = False
+        return {"blocks": blocks, "seconds": round(blocks * cfg.blocksize / cfg.samplerate, 2)}
+
+    def capture_status(self) -> dict:
+        with self._tap_lock:
+            return {
+                "recording": self._tap_left > 0,
+                "ready": self._tap_ready,
+                "captured": len(self._tap_raw),
+            }
+
+    def capture_audio(self, side: str) -> tuple[np.ndarray, int] | None:
+        """The finished recording. `side` is "before" or "after"."""
+        with self._tap_lock:
+            if not self._tap_ready:
+                return None
+            chunks = self._tap_raw if side == "before" else self._tap_out
+            if not chunks:
+                return None
+            data = np.concatenate(chunks)
+        return data, self._store.get().audio.samplerate
 
     def _on_output(self, outdata, frames, time_info, status) -> None:
         if status:

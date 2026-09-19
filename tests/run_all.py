@@ -20,7 +20,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-SUITES = ["test_core", "test_video_path", "test_virtual_camera", "test_cable_path"]
+SUITES = ["test_core", "test_video_path", "test_virtual_camera",
+          "test_cable_path", "test_audio_ab"]
 
 
 def ready() -> bool:
@@ -46,7 +47,7 @@ def main() -> int:
         output = result.stdout.strip()
         print(output or result.stderr.strip())
 
-        if "restart with --mic" in output:
+        if "restart with --mic" in output or 'restart with --mic' in output:
             skipped.append(name)
         elif result.returncode != 0:
             failed.append(name)

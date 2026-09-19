@@ -21,6 +21,8 @@
 
 <main>
 
+ <section class="stage">
+
   <div class="preview">
     <img id="preview" src="/preview.mjpg" alt="camera preview">
     <div id="stall-flash" class="stall-flash"></div>
@@ -36,9 +38,13 @@
     </span>
   </div>
 
-  <!-- everything above the fold is what gets touched during a call -->
+  <p class="hint" id="hotkey-hint"></p>
 
-  <section class="quick">
+ </section>
+
+ <section class="side">
+
+  <div class="quick">
     <div class="presets" id="presets"></div>
 
     <div class="picks">
@@ -54,9 +60,24 @@
     </div>
 
     <div class="checks" id="quick-checks"></div>
+  </div>
 
-    <p class="hint" id="hotkey-hint"></p>
-  </section>
+  <details class="fold" data-fold="audiotest" open>
+    <summary>test the audio<span class="sub">hear what the call hears</span></summary>
+    <div class="row">
+      <button id="btn-audio-test" class="btn">record</button>
+      <select id="audio-test-secs" class="secs">
+        <option value="3">3 s</option>
+        <option value="5" selected>5 s</option>
+        <option value="10">10 s</option>
+      </select>
+      <span id="audio-test-note" class="note"></span>
+    </div>
+    <div class="ab" id="audio-test-players" hidden>
+      <label>your microphone<audio id="audio-before" controls preload="none"></audio></label>
+      <label>what the call hears<audio id="audio-after" controls preload="none"></audio></label>
+    </div>
+  </details>
 
   <!-- set once, then folded away -->
 
@@ -90,6 +111,8 @@
   </details>
 
   <p class="note" id="errors"></p>
+
+ </section>
 
 </main>
 
