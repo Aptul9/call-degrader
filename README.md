@@ -177,6 +177,8 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 
 ## Traps
 
+**The A/B player and the call are the same chain with different dice, and over a short take the dice dominate.** The player renders with a fixed seed so two presses are comparable; the chain feeding the call is unseeded and running. Measured on one 13 s phrase, `barely there` across twelve draws came out between 0.187 and 0.773 silent: the same preset on the same words, either mostly audible or almost entirely gone. So the player tells you what a setting does on average, not what this minute of the call will sound like. Stall rate and length are what drive it, because Poisson variance on a handful of expected events is enormous and one four-second stall eats a third of a short take. `tools/seed_spread.py` measures the spread for a given preset.
+
 **Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene instead.
 
 **The window icon must be a `.ico`, and a `.png` does not fail, it kills the process.** pywebview hands it to `System.Drawing.Icon`, which reads ICO only, on a .NET dispatcher thread. The `ArgumentException` never becomes a Python exception: the process exits with `0xE0434352`, no window, no traceback, nothing in the log past the audio chain. Every headless check passed on that build, because they all run `--no-window`. `tests/test_exe.py` now starts one windowed and waits past the eight seconds it took to die.

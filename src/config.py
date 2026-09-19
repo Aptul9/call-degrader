@@ -313,10 +313,18 @@ AUDIO_PRESETS: dict[str, dict] = {
             "warble_weight": 2.0, "metallic_weight": 0.4,
         },
     },
+    # Stalls come often and short rather than rarely and long, and that is
+    # about variance, not severity. At 20 a minute with stalls of 1 to 4
+    # seconds, one draw of a 13 s take measured 0.187 of it silent and another
+    # 0.773: the same preset on the same words was either mostly audible or
+    # almost entirely gone, and which one you got was luck. That is why the
+    # A/B player and the call sound like different settings. At 40 a minute
+    # with 0.4 to 1.6 the average interruption is about the same, 0.405
+    # against 0.472, and the spread across draws halves, 0.269 against 0.586.
     "barely there": {
         "link": {
             "enabled": True, "quality": 8.0, "ceiling": 22.0, "floor": 0.0,
-            "drift": 8.0, "stall_rate": 20.0, "stall_min": 1.0, "stall_max": 4.0,
+            "drift": 8.0, "stall_rate": 40.0, "stall_min": 0.4, "stall_max": 1.6,
         },
         "audio": {
             "dropout_weight": 2.0, "stutter_weight": 1.8, "bitcrush_weight": 1.5,
