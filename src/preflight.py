@@ -28,7 +28,10 @@ _MF_PLATFORM_32 = r"SOFTWARE\WOW6432Node\Microsoft\Windows Media Foundation\Plat
 class Finding:
     """One thing that is wrong, and what to type to make it right."""
 
-    level: str  # "blocker" stops a call working, "warning" narrows what works
+    # "blocker" stops a call working, "warning" narrows what works, "note" is
+    # something that used to matter and may still on an older build. A note is
+    # not an alarm: it prints quietly and never colours the banner.
+    level: str
     what: str
     fix: str
 
@@ -159,9 +162,16 @@ def _teams_frame_server() -> list[Finding]:
     )
     if on:
         return []
+    # Stated as a fact until 2026-09-19, when it turned out not to be one.
+    # MSTeams 26225.1806.5074.1452 lists the virtual camera with both values
+    # absent, so whatever it needed before, it does not need this now. The
+    # check stays because older builds did, and because the fix costs nothing
+    # to write down; it is a note rather than a warning because on a working
+    # machine an amber banner every start is just noise.
     return [Finding(
-        "warning",
-        "the new Teams desktop app will not list the virtual camera (frame server mode is off)",
+        "note",
+        "frame server mode is off; older Teams desktop builds needed it to list the virtual camera, "
+        "current ones do not. Only act on this if Teams has no camera to pick",
         'from an elevated prompt, then reboot:\n'
         '    reg add "HKLM\\SOFTWARE\\Microsoft\\Windows Media Foundation\\Platform" '
         '/v EnableFrameServerMode /t REG_DWORD /d 1 /f\n'
@@ -188,8 +198,8 @@ def run(want_video: bool = True, want_audio: bool = True) -> list[Finding]:
     if want_audio:
         findings += _cable()
 
-    order = {"blocker": 0, "warning": 1}
-    return sorted(findings, key=lambda f: order.get(f.level, 2))
+    order = {"blocker": 0, "warning": 1, "note": 2}
+    return sorted(findings, key=lambda f: order.get(f.level, 3))
 
 
 def report(findings: list[Finding]) -> str:
@@ -199,13 +209,16 @@ def report(findings: list[Finding]) -> str:
 
     lines = []
     blockers = [f for f in findings if f.level == "blocker"]
+    warnings = [f for f in findings if f.level == "warning"]
     if blockers:
         lines.append(f"preflight: {len(blockers)} thing(s) will stop this working")
+    elif warnings:
+        lines.append("preflight: everything needed for a call is present, with warnings")
     else:
-        lines.append("preflight: everything needed for a call is present, with notes")
+        lines.append("preflight: virtual camera, cable and camera all present")
 
     for f in findings:
-        mark = "!!" if f.level == "blocker" else " -"
+        mark = {"blocker": "!!", "warning": " -"}.get(f.level, " .")
         lines.append(f"  {mark} {f.what}")
         for line in f.fix.splitlines():
             if line.strip():

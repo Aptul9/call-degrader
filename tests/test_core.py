@@ -243,14 +243,15 @@ def test_preflight_names_a_fix_for_everything_it_reports():
 
     findings = preflight.run()
     for f in findings:
-        assert f.level in ("blocker", "warning"), f"unknown level {f.level!r}"
+        assert f.level in ("blocker", "warning", "note"), f"unknown level {f.level!r}"
         assert f.what.strip(), "a finding has to say what is wrong"
         assert f.fix.strip(), f"no fix given for {f.what!r}"
         assert f.to_dict()["what"] == f.what
 
     # Blockers first, so the thing that stops a call working is read first.
     levels = [f.level for f in findings]
-    assert levels == sorted(levels, key=lambda l: {"blocker": 0, "warning": 1}[l])
+    rank = {"blocker": 0, "warning": 1, "note": 2}
+    assert levels == sorted(levels, key=lambda l: rank[l])
 
 
 def test_preflight_skips_a_chain_that_was_turned_off():
@@ -274,6 +275,12 @@ def test_preflight_report_is_readable_when_everything_is_missing():
     assert "!! no CABLE Input" in text
     assert "install VB-CABLE" in text and "then reboot" in text
     assert report([]).startswith("preflight: virtual camera, cable and camera all present")
+
+    # A note alone is not a warning. The banner has to stay quiet on a
+    # machine where everything actually works.
+    quiet = report([Finding("note", "frame server mode is off", "reg add ...")])
+    assert "warnings" not in quiet and "stop this working" not in quiet
+    assert " . frame server mode is off" in quiet
 
 
 def test_link_is_reproducible_for_a_given_seed():

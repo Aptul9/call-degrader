@@ -34,9 +34,11 @@ That registers CLSID `{A3FCE0F5-3493-419F-958A-ABA1250EC20B}` under `HKLM\SOFTWA
 
 Without this the tool still runs and the audio still works. The video appears in the preview and goes nowhere else, and the status bar says so.
 
-### Microsoft Teams needs one more thing
+### Microsoft Teams, only if it shows you no camera
 
-The new Teams reads the Windows Media Foundation frame server. The OBS virtual camera is a DirectShow filter and stays invisible to it until frame-server mode is switched on. From an elevated prompt, **then reboot**:
+Try Teams first. On MSTeams 26225.1806.5074.1452 both the virtual camera and the virtual microphone appear in the device list with none of this done, checked 2026-09-19.
+
+Older builds did need it. The new Teams reads the Windows Media Foundation frame server, and the OBS virtual camera is a DirectShow filter, which stays invisible to that path until frame-server mode is switched on. If your Teams has no camera to pick, this is the fix. From an elevated prompt, **then reboot**:
 
 ```
 reg add "HKLM\SOFTWARE\Microsoft\Windows Media Foundation\Platform" /v EnableFrameServerMode /t REG_DWORD /d 1 /f
@@ -100,7 +102,7 @@ Hold **hold to record** and talk, release, and one player appears with both take
 
 The processed side is rendered from the stored take, not captured during the recording, and it is re-rendered whenever anything that reaches the audio chain moves. Click a preset, drag a weight, change the line, and the call side rebuilds itself from the same words. Nothing is recorded twice.
 
-Both takes play at once through their own gain, so the switch between them crossfades in 8 ms instead of restarting. Flipping sides lands on the same syllable, which is the only way to hear what an effect did to a particular consonant. `space` plays, `a` flips, clicking the wave moves the playhead, and leaving loop on lets a phrase repeat while you turn a weight down.
+Both takes play at once through their own gain, so the switch between them crossfades in 8 ms instead of restarting. Flipping sides lands on the same syllable, which is the only way to hear what an effect did to a particular consonant. `space` plays, `a` flips, dragging the wave moves the playhead, and `loop` repeats a phrase while you turn a weight down.
 
 The wave draws both: the microphone as a dim silhouette, the call side over the top. Anything the line ate shows up as the front shape not being there.
 
@@ -136,7 +138,7 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 
 **Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene instead.
 
-**The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll`, and `current` is a scoop junction, so an OBS update keeps working and `scoop uninstall obs-studio` leaves the CLSID registered against a file that is gone: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair is the one that goes missing on its own, and it was found absent on the development machine after having been set and confirmed working. The preflight reports all three on every start, which is why it exists.
+**The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll`, and `current` is a scoop junction, so an OBS update keeps working and `scoop uninstall obs-studio` leaves the CLSID registered against a file that is gone: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair was found absent on the development machine after having been set earlier, and Teams went on listing both devices anyway, so current builds do not depend on it. The preflight reports all three on every start, the Teams one quietly as a note.
 
 **VB-CABLE device variants are not interchangeable, and the channel count is not what decides it.** Measured by writing a 440 Hz tone into each variant and reading it back: `CABLE Input` on MME carries; `CABLE Output` on MME returns one 16-bit LSB of dither; `CABLE Output` on WASAPI will not open (`PaErrorCode -9999`); several other pairings segfault PortAudio. The working playback device is the 16-channel MME one. The order used is in `src/audio.py`.
 

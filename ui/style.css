@@ -162,9 +162,13 @@ main[hidden] { display: none; }
   background: #2a2318;
 }
 .preflight-row.blocker { border-color: #6a2b2b; background: #2b1a1a; }
+/* A note is not an alarm. Same box, no colour, so a machine where everything
+   works does not get an amber banner every time it starts. */
+.preflight-row.note { border-color: var(--line); background: var(--panel-2); }
 
 .preflight-what { margin: 0; font-size: 13px; color: var(--loop); }
 .preflight-row.blocker .preflight-what { color: var(--rec); }
+.preflight-row.note .preflight-what { color: var(--muted); }
 
 .preflight-fix {
   margin: 7px 0 0;
