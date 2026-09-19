@@ -98,6 +98,7 @@ function patch(section, field, value) {
       settings = reply.settings;
       markPreset(reply.preset);
       markAudioPreset(reply.audio_preset);
+      markPauses();  // the server is the authority on whether it actually took
       if (payload.link) markInert();
       // The line drives the audio chain as well, so either section changes
       // what the far end hears.
@@ -278,6 +279,20 @@ function markAudioPreset(name) {
 // Every effect weight scales a reaction to a falling line. With the line off
 // they all multiply zero, so the sliders move and nothing happens. That is
 // exactly the trap this banner exists to close.
+// In the top bar beside the status pills, not inside a panel. They release a
+// device rather than drive either chain, and they get pressed mid-call from
+// whichever tab happens to be open.
+function wirePauses() {
+  for (const [id, section] of [['btn-pause-camera', 'video'], ['btn-pause-mic', 'audio']]) {
+    $(id).addEventListener('click', (event) => {
+      patch(section, 'paused', !settings[section].paused);
+      markPauses();
+      event.currentTarget.blur();
+    });
+  }
+  markPauses();
+}
+
 function markPauses() {
   for (const [id, section, off, on] of [
     ['btn-pause-camera', 'video', 'pause camera', 'camera paused'],
@@ -369,16 +384,6 @@ function wirePedal() {
   // leave it recording with the UI showing it as held.
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
-
-  // Buttons rather than checkboxes, and next to the pedal, because these two
-  // get pressed during a call: the device is released while they are on, so
-  // the camera light and the microphone indicator both go out.
-  for (const [id, section] of [['btn-pause-camera', 'video'], ['btn-pause-mic', 'audio']]) {
-    $(id).addEventListener('click', () => {
-      patch(section, 'paused', !settings[section].paused);
-      markPauses();
-    });
-  }
 
   $('btn-rescan').addEventListener('click', buildCameras);
   $('btn-live').addEventListener('click', () => send('/api/pedal/live'));
@@ -919,6 +924,7 @@ function showError(message) {
   markAudioPreset(state.audio_preset);
   render();
   wireTabs();
+  wirePauses();
   wirePedal();
   wireAudioTest();
   wireAbPlayer();

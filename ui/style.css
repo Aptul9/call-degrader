@@ -148,9 +148,11 @@ main[hidden] { display: none; }
 .btn-rec.held { background: var(--rec); color: #1a0d0f; border-color: var(--rec); }
 .btn-quiet { color: var(--muted); }
 
-/* Pushed away from the pedal: these release a device rather than drive the
-   loop, and a mis-click during a call is expensive either way round. */
-.pedal-gap { flex: 0 0 18px; }
+/* Top bar, pushed to the right of the status pills. These release a device
+   rather than drive the loop, and they have to be reachable from either tab
+   without hunting for the panel that happens to be open. */
+.pauses { display: flex; gap: 8px; margin-left: auto; }
+.btn-pause { padding: 6px 12px; font-size: 12px; }
 .btn-pause.on { background: var(--loop); color: #1c1608; border-color: var(--loop); }
 .btn-small { padding: 7px 11px; font-size: 12px; }
 
