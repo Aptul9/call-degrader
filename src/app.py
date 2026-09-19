@@ -10,7 +10,14 @@ from __future__ import annotations
 import logging
 
 from .audio import AudioPipeline, list_devices, set_default_microphone
-from .config import AUDIO_PRESETS, PRESETS, Settings, SettingsStore
+from .config import (
+    AUDIO_PRESETS,
+    PRESETS,
+    Settings,
+    SettingsStore,
+    match_audio_preset,
+    match_preset,
+)
 from .hotkeys import Hotkeys
 from .state import LinkSimulator
 from .video import VideoPipeline, list_cameras
@@ -116,9 +123,24 @@ class Controller:
             "hotkeys": {"error": self.hotkeys.error},
         }
 
+    def settings_reply(self, settings: Settings | None = None) -> dict:
+        """Settings, plus which presets those values currently amount to.
+
+        Every write answers with this, so the highlight in the UI is read off
+        the values rather than remembered from the click that produced them.
+        A reload, or a slider that walks the settings off a preset, then both
+        land on the truth without the client keeping its own tally.
+        """
+        current = settings or self.settings.get()
+        return {
+            "settings": current.to_dict(),
+            "preset": match_preset(current),
+            "audio_preset": match_audio_preset(current),
+        }
+
     def full_state(self) -> dict:
         return {
-            "settings": self.settings.get().to_dict(),
+            **self.settings_reply(),
             "status": self.status(),
             "presets": list(PRESETS),
             "audio_presets": list(AUDIO_PRESETS),

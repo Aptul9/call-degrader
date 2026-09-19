@@ -276,7 +276,24 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .ab { display: grid; gap: 10px; margin: 14px 16px 4px; }
 
 .ab-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.ab-play { min-width: 72px; }
+
+.ab-play {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #0d1524;
+  cursor: pointer;
+}
+.ab-play:hover { filter: brightness(1.12); }
+.ab-play svg { width: 18px; height: 18px; fill: currentColor; }
+.ab-play .icon-pause,
+.ab-play.playing .icon-play { display: none; }
+.ab-play.playing .icon-pause { display: block; }
 
 /* Segmented, not two buttons: the two sides are one choice, and the switch
    never stops playback, so it has to read as a position rather than an action. */

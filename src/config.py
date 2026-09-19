@@ -297,6 +297,40 @@ AUDIO_PRESETS: dict[str, dict] = {
 }
 
 
+def _matches(settings: "Settings", preset: dict) -> bool:
+    for section, values in preset.items():
+        current = getattr(settings, section, None)
+        if current is None:
+            return False
+        for field, want in values.items():
+            got = getattr(current, field, None)
+            if isinstance(want, bool) or isinstance(got, bool):
+                if bool(got) != bool(want):
+                    return False
+            elif isinstance(want, (int, float)) and isinstance(got, (int, float)):
+                if abs(float(got) - float(want)) > 1e-6:
+                    return False
+            elif got != want:
+                return False
+    return True
+
+
+def match_preset(settings: "Settings") -> str | None:
+    """Which line preset these settings are, if any.
+
+    Nothing stores the name: a preset is shorthand for a set of field values
+    and nothing else. Deriving it back is what survives a page reload, where
+    the browser has forgotten what was clicked and the server never knew. It
+    also drops the highlight the moment a slider moves the settings off the
+    preset, which the old client-side guess got wrong in both directions.
+    """
+    return next((name for name, p in PRESETS.items() if _matches(settings, p)), None)
+
+
+def match_audio_preset(settings: "Settings") -> str | None:
+    return next((name for name, p in AUDIO_PRESETS.items() if _matches(settings, p)), None)
+
+
 _SECTIONS = {
     "link": LinkSettings,
     "video": VideoSettings,

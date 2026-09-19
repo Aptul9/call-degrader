@@ -100,7 +100,10 @@
 
       <div class="ab" id="audio-test-players" hidden>
         <div class="ab-bar">
-          <button id="ab-play" class="btn ab-play" type="button">play</button>
+          <button id="ab-play" class="ab-play" type="button" aria-label="play">
+            <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6L19 12z"/></svg>
+            <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 5h4v14h-4zm7 0h4v14h-4z"/></svg>
+          </button>
           <div class="ab-switch" id="ab-switch" role="group" aria-label="which side you are hearing">
             <button type="button" data-side="before">your microphone</button>
             <button type="button" data-side="after" class="on">what the call hears</button>

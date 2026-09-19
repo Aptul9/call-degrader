@@ -91,12 +91,14 @@ function patch(section, field, value) {
     pending = null;
     patch.queued = false;
     try {
-      settings = (await send('/api/settings', payload)).settings;
-      if (payload.link) {
-        markPreset(null);  // a hand edit is no longer that preset
-        markAudioPreset(null);
-        markInert();
-      }
+      // The reply carries which presets the values now amount to, so the
+      // highlight is read off the settings rather than guessed from the last
+      // thing clicked. A slider dragged back onto a preset lights it again.
+      const reply = await send('/api/settings', payload);
+      settings = reply.settings;
+      markPreset(reply.preset);
+      markAudioPreset(reply.audio_preset);
+      if (payload.link) markInert();
       // The line drives the audio chain as well, so either section changes
       // what the far end hears.
       if (payload.link || payload.audio) abRefreshSoon();
@@ -228,8 +230,10 @@ function buildPresets(names) {
     btn.dataset.preset = name;
     btn.addEventListener('click', async () => {
       try {
-        settings = (await send(`/api/preset/${name}`)).settings;
-        markPreset(name);
+        const reply = await send(`/api/preset/${name}`);
+        settings = reply.settings;
+        markPreset(reply.preset);
+        markAudioPreset(reply.audio_preset);
         render();
         // A line preset is an audio change too, so the call side follows it.
         abRefreshSoon();
@@ -250,8 +254,10 @@ function buildAudioPresets(names) {
     btn.dataset.audioPreset = name;
     btn.addEventListener('click', async () => {
       try {
-        settings = (await send(`/api/audio-preset/${encodeURIComponent(name)}`)).settings;
-        markAudioPreset(name);
+        const reply = await send(`/api/audio-preset/${encodeURIComponent(name)}`);
+        settings = reply.settings;
+        markPreset(reply.preset);
+        markAudioPreset(reply.audio_preset);
         render();
         abRefreshSoon();
       } catch (err) {
@@ -696,7 +702,10 @@ function abPaint() {
   if (clock) clock.textContent = `${abClock(at)} / ${abClock(span)}`;
 
   const play = $('ab-play');
-  if (play) play.textContent = AB.playing ? 'pause' : 'play';
+  if (play) {
+    play.classList.toggle('playing', AB.playing);
+    play.setAttribute('aria-label', AB.playing ? 'pause' : 'play');
+  }
 }
 
 function abClock(seconds) {
@@ -790,6 +799,24 @@ function wireAbPlayer() {
 // the take already on the server. The button that used to do this by hand is
 // gone: a comparison you have to remember to ask for is a comparison nobody
 // makes.
+// The take lives on the server, not in the page. A reload forgets the player
+// and nothing else: the recording it was showing is still held, so it comes
+// back on its own rather than making someone hold the button again to see
+// where they had got to.
+async function abRestore() {
+  try {
+    const take = await (await fetch('/api/audio-test/status')).json();
+    if (!take.ready) return;
+    $('audio-test-players').hidden = false;
+    await abLoad({ both: true });
+    $('audio-test-note').textContent =
+      `${take.seconds.toFixed(1)}s still held from before, mic peak ${take.peak_in.toFixed(3)}`;
+  } catch (err) {
+    // Nothing recorded yet, or the audio chain is down. Either way the panel
+    // is correct as it stands, so this stays quiet.
+  }
+}
+
 function abRefreshSoon() {
   if ($('audio-test-players').hidden) return;
   clearTimeout(AB.pending);
@@ -864,12 +891,15 @@ function showError(message) {
   settings = state.settings;
   buildPresets(state.presets);
   buildAudioPresets(state.audio_presets || []);
+  markPreset(state.preset);
+  markAudioPreset(state.audio_preset);
   render();
   wireTabs();
   wirePedal();
   wireAudioTest();
   wireAbPlayer();
   wireStatus();
+  abRestore();
   $('hotkey-hint').textContent =
     `Hold ${settings.pedal.record_key} to record, ${settings.pedal.live_key} to go live. `
     + 'The hotkeys work while another window has focus.';
