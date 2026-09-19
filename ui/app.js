@@ -466,7 +466,7 @@ const AB = {
   playing: false,
   startedAt: 0,   // ctx.currentTime that position 0 of this run corresponds to
   offset: 0,      // where the playhead sits while paused
-  loop: true,
+  loop: false,
   raf: null,
   pending: null,  // debounce handle for a re-render
 };
@@ -733,15 +733,44 @@ function wireAbPlayer() {
     if (AB.playing) abStart(abPosition());
   });
 
-  const seek = (event) => {
+  // Scrubbing restarts two buffer sources, so doing it per pointermove would
+  // rebuild the graph sixty times a second and stutter. The drag moves the
+  // playhead only; playback picks up again where the pointer is let go.
+  let dragging = false;
+  let resume = false;
+
+  const at = (event) => {
     const span = abDuration();
-    if (!span) return;
     const box = canvas.getBoundingClientRect();
-    const at = ((event.clientX - box.left) / box.width) * span;
-    if (AB.playing) abStart(at);
-    else { AB.offset = Math.max(0, Math.min(span, at)); abPaint(); }
+    const x = (event.clientX - box.left) / box.width;
+    return Math.max(0, Math.min(span, x * span));
   };
-  canvas.addEventListener('pointerdown', seek);
+
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!abDuration()) return;
+    dragging = true;
+    resume = AB.playing;
+    canvas.setPointerCapture(event.pointerId);
+    canvas.classList.add('dragging');
+    if (AB.playing) abPause(at(event));
+    else { AB.offset = at(event); abPaint(); }
+  });
+
+  canvas.addEventListener('pointermove', (event) => {
+    if (!dragging) return;
+    AB.offset = at(event);
+    abPaint();
+  });
+
+  const drop = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    canvas.classList.remove('dragging');
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    if (resume) abStart(AB.offset);
+  };
+  canvas.addEventListener('pointerup', drop);
+  canvas.addEventListener('pointercancel', drop);
 
   window.addEventListener('keydown', (event) => {
     if ($('audio-test-players').hidden) return;
