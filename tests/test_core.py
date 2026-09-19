@@ -237,6 +237,28 @@ def test_a_paused_card_is_never_mirrored():
         "the flip has to skip sources that draw their own frames"
 
 
+def test_the_window_icon_is_an_ico_not_a_png():
+    """A png here does not fail, it kills the process.
+
+    pywebview hands the icon straight to System.Drawing.Icon, which reads ICO
+    and not PNG, and it does so on a .NET dispatcher thread. The
+    ArgumentException never becomes a Python exception: the process dies with
+    0xE0434352 and writes nothing, so the app started, opened its audio chain
+    and vanished with no window and no traceback.
+    """
+    import inspect
+
+    import run
+
+    body = inspect.getsource(run._run_windowed)
+    assert '_asset("icon.ico")' in body, "the window icon has to be the .ico"
+    assert "icon.png" not in body, "a png passed to the window is a silent process kill"
+
+    ico = Path(__file__).resolve().parent.parent / "assets" / "icon.ico"
+    assert ico.exists(), "assets/icon.ico is missing, run assets/make_icon.py"
+    assert ico.read_bytes()[:4] == b"\x00\x00\x01\x00", "that file is not an ICO"
+
+
 def test_preflight_names_a_fix_for_everything_it_reports():
     """A finding without a command is a complaint, not a diagnosis."""
     from src import preflight

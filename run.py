@@ -11,12 +11,82 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
+from pathlib import Path
 
 from src import preflight
 from src.app import Controller
 from src.config import AudioSettings, Settings, VideoSettings
+
+log = logging.getLogger("call-degrader")
+
+
+LOG_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "call-degrader"
+
+
+def _setup_output(verbose: bool) -> Path | None:
+    """Logging, plus somewhere for output to go when there is no console.
+
+    A windowed build has no console, and PyInstaller then leaves `sys.stdout`
+    and `sys.stderr` as None. A bare `print()` raises `AttributeError` there
+    and the process dies before the window opens, with nothing on screen to
+    say why. So when there is no stderr everything goes to a file, which is
+    then the only record a failed start leaves behind.
+    """
+    level = logging.DEBUG if verbose else logging.INFO
+    fmt = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+
+    handlers: list[logging.Handler] = []
+    logfile: Path | None = None
+    if sys.stderr is None or getattr(sys, "frozen", False):
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            logfile = LOG_DIR / "call-degrader.log"
+            # Append, never truncate. Opening "w" while another instance holds
+            # the file is a sharing violation on Windows, and the handler here
+            # then quietly fell back to no file at all: the second run left no
+            # trace and the first run's stale log sat there looking like its
+            # output. Two instances back to back is the normal case, because
+            # that is what the test suite does.
+            if logfile.exists() and logfile.stat().st_size > 1_000_000:
+                logfile.unlink()
+            handlers.append(logging.FileHandler(logfile, mode="a", encoding="utf-8"))
+        except OSError:
+            logfile = None  # read-only install directory, carry on without it
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler(sys.stderr))
+
+    logging.basicConfig(level=level, format=fmt, datefmt="%H:%M:%S", handlers=handlers)
+
+    if logfile:
+        # One file, many runs. Without a banner carrying the pid there is no
+        # way to tell where one start ends and the next begins.
+        log.info("%s", "=" * 62)
+        log.info("call-degrader pid %s starting", os.getpid())
+    return logfile
+
+
+def _asset(name: str) -> Path | None:
+    """An `assets/` file, wherever it ended up.
+
+    Frozen it is under `sys._MEIPASS`, from a checkout it is beside this file.
+    Returns None rather than raising: a missing icon is worth a blank taskbar
+    entry, not a refusal to start.
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    root = Path(bundle) if bundle else Path(__file__).resolve().parent
+    path = root / "assets" / name
+    return path if path.exists() else None
+
+
+def _say(text: str) -> None:
+    """For the things a terminal would show. Safe with no terminal."""
+    for line in text.splitlines():
+        log.info("%s", line)
+    if sys.stderr is not None:
+        print(text, file=sys.stderr)
 
 
 def main() -> int:
@@ -40,11 +110,7 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    logfile = _setup_output(args.verbose)
 
     if args.check:
         return _check()
@@ -52,7 +118,7 @@ def main() -> int:
     try:
         width, height = (int(v) for v in args.size.lower().split("x"))
     except ValueError:
-        print(f"bad --size {args.size!r}, expected WIDTHxHEIGHT", file=sys.stderr)
+        _say(f"bad --size {args.size!r}, expected WIDTHxHEIGHT")
         return 2
 
     settings = Settings(
@@ -77,7 +143,9 @@ def main() -> int:
     findings = preflight.run(
         want_video=not args.no_video, want_audio=not args.no_audio
     )
-    print(preflight.report(findings), file=sys.stderr)
+    _say(preflight.report(findings))
+    if logfile:
+        _say(f"  log: {logfile}")
 
     controller = Controller(settings)
     controller.start()
@@ -101,7 +169,7 @@ def _run_headless(controller, args) -> int:
 
     from src.server import create_app
 
-    print(f"\n  UI on http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{args.port}\n")
+    _say(f"\n  UI on http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{args.port}\n")
     try:
         uvicorn.run(
             create_app(controller),
@@ -131,7 +199,7 @@ def _run_windowed(controller, args) -> int:
     try:
         import webview
     except ImportError as exc:
-        print(f"no native window ({exc}), falling back to the browser", file=sys.stderr)
+        _say(f"no native window ({exc}), falling back to the browser")
         return _run_headless(controller, args)
 
     host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
@@ -150,9 +218,9 @@ def _run_windowed(controller, args) -> int:
             break
         time.sleep(0.05)
     else:
-        print("the server did not come up, falling back to the browser", file=sys.stderr)
+        _say("the server did not come up, falling back to the browser")
 
-    print(f"\n  UI in a window, and at http://{host}:{args.port}\n")
+    _say(f"\n  UI in a window, and at http://{host}:{args.port}\n")
     webview.create_window(
         "call-degrader",
         f"http://{host}:{args.port}",
@@ -161,7 +229,17 @@ def _run_windowed(controller, args) -> int:
         min_size=(900, 620),
     )
     try:
-        webview.start()
+        # The exe carries its own icon, but the window is drawn by WebView2
+        # and takes this one, so without it the taskbar entry is a generic
+        # blank while the file in Explorer is not.
+        #
+        # It has to be a .ico. pywebview hands this straight to
+        # System.Drawing.Icon, which does not read PNG, and it does so on a
+        # .NET dispatcher thread: the ArgumentException never becomes a Python
+        # exception, it takes the whole process down with 0xE0434352 and no
+        # traceback. A png here cost a build and an event-log trawl to find.
+        icon = _asset("icon.ico")
+        webview.start(**({"icon": str(icon)} if icon else {}))
     except KeyboardInterrupt:
         pass
 
@@ -175,12 +253,12 @@ def _check() -> int:
 
     devices = list_devices()
     for kind in ("inputs", "outputs"):
-        print(f"\n{kind}:")
+        _say(f"\n{kind}:")
         for d in devices[kind]:
-            print(f"  [{d['index']:>3}] {d['name'][:44]:<44} {d['api']:<18} "
+            _say(f"  [{d['index']:>3}] {d['name'][:44]:<44} {d['api']:<18} "
                   f"{d['channels']}ch {d['samplerate']} Hz")
 
-    print("\ncamera:")
+    _say("\ncamera:")
     import cv2
 
     for index in range(4):
@@ -188,17 +266,17 @@ def _check() -> int:
         if cap.isOpened():
             ok, frame = cap.read()
             if ok and frame is not None:
-                print(f"  [{index}] {frame.shape[1]}x{frame.shape[0]}")
+                _say(f"  [{index}] {frame.shape[1]}x{frame.shape[0]}")
         cap.release()
 
-    print("\nvirtual camera:")
+    _say("\nvirtual camera:")
     try:
         import pyvirtualcam
 
         with pyvirtualcam.Camera(width=640, height=360, fps=30) as cam:
-            print(f"  available: {cam.device}")
+            _say(f"  available: {cam.device}")
     except Exception as exc:
-        print(f"  unavailable: {exc}")
+        _say(f"  unavailable: {exc}")
     return 0
 
 

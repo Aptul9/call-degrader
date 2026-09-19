@@ -143,9 +143,17 @@ The process count is what matters, not the seconds. The single file is a bootloa
 
 Being a bootloader also costs the start time, and it never improves: 4.10 s cold against 4.08 s on the second run, because it re-extracts every launch.
 
-The console window is kept on purpose. It carries the preflight report, and without a tray icon it is how the app is stopped.
+There is no console window. Closing the window stops the app, and the preflight report reaches the UI as a banner. Everything that would have gone to a terminal is appended to:
+
+```
+%LOCALAPPDATA%\call-degrader\call-degrader.log
+```
+
+That file is the only thing a failed start leaves behind, so it is the first place to look if the icon appears in the taskbar and no window ever does. Each run writes a banner with its pid, because one file holds many runs.
 
 Neither build removes VB-CABLE or the OBS registration. Those are installed separately whatever the exe looks like.
+
+`assets/make_icon.py` draws the icon and writes `assets/icon.ico`. `assets/icon.svg` beside it is the reference drawing; the two are kept in step by hand. Run it after changing either.
 
 ```
 .venv/Scripts/python.exe tests/test_exe.py
@@ -168,6 +176,8 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 ## Traps
 
 **Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene instead.
+
+**The window icon must be a `.ico`, and a `.png` does not fail, it kills the process.** pywebview hands it to `System.Drawing.Icon`, which reads ICO only, on a .NET dispatcher thread. The `ArgumentException` never becomes a Python exception: the process exits with `0xE0434352`, no window, no traceback, nothing in the log past the audio chain. Every headless check passed on that build, because they all run `--no-window`. `tests/test_exe.py` now starts one windowed and waits past the eight seconds it took to die.
 
 **A onefile bundle is a bootloader, so killing it kills the wrong process.** It unpacks itself and runs the real application as a child, and Task Manager shows two entries with the same name. End the visible one and the survivor keeps serving, keeps the port and keeps the camera and the cable, with nothing on screen: measured, the orphan still answered HTTP 200. The same thing bit the test harness, where `terminate()` left three behind and the next run reported a 0.01 s cold start because it had connected to the previous one. Kill the tree, `taskkill /F /T /PID`. The folder build is a single process and has none of this.
 

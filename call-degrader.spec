@@ -6,13 +6,14 @@
 # dist/call-degrader.exe (one file, unpacks itself to a temp directory on
 # every launch, so it starts slower the heavier the bundle is).
 #
-# The console is kept on purpose. It carries the preflight report, which is
-# the first thing anyone needs when a call cannot see the camera, and it is
-# how the app is stopped without a tray icon.
+# No console. The window is what the app is now, closing it is what stops it,
+# and the preflight report reaches the UI as a banner. Nothing is lost by
+# hiding it because run.py writes the same output to a log file whenever there
+# is no stderr to write to, which is exactly the windowed case.
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
-datas = [("ui", "ui")]
+datas = [("ui", "ui"), ("assets/icon.ico", "assets"), ("assets/icon.png", "assets")]
 binaries = []
 hiddenimports = []
 
@@ -57,8 +58,9 @@ exe_dir = EXE(
     [],
     exclude_binaries=True,
     name="call-degrader",
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
+    icon="assets/icon.ico",
     upx=False,
 )
 
@@ -80,7 +82,8 @@ exe_one = EXE(
     a.datas,
     [],
     name="call-degrader-portable",
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
+    icon="assets/icon.ico",
     upx=False,
 )

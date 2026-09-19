@@ -155,6 +155,60 @@ def check_bundle(label: str, exe: Path, port: int) -> list[str]:
     return failures
 
 
+def check_window(exe: Path, port: int) -> list[str]:
+    """Start it the way a double-click does, and see whether it stays up.
+
+    Everything else here passes --no-window, so nothing else exercises the
+    path a user actually takes. That gap hid a crash: the window icon was a
+    png, System.Drawing.Icon rejected it on a .NET thread, and the process
+    died at about eight seconds with no window, no traceback and no Python
+    exception to catch. Every headless check passed on that same binary.
+
+    A window appears for a few seconds while this runs. That is the test.
+    """
+    failures: list[str] = []
+    print("\nwindowed, as a double-click would: (a window will appear briefly)")
+    proc = subprocess.Popen([str(exe), "--port", str(port)],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding="utf-8", errors="replace")
+    base = f"http://127.0.0.1:{port}"
+    try:
+        # Well past where the icon crash landed, and past a slow camera open.
+        deadline = time.monotonic() + 25
+        serving = False
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                _get(base, "/", timeout=1.5)
+                serving = True
+                break
+            except (urllib.error.URLError, OSError, TimeoutError):
+                time.sleep(0.3)
+
+        alive = proc.poll() is None
+        print(f"  {'ok  ' if alive else 'FAIL'} still running"
+              f"{'' if alive else f' (exit {proc.returncode})'}")
+        if not alive:
+            failures.append("windowed: the process died")
+        print(f"  {'ok  ' if serving else 'FAIL'} serving")
+        if not serving:
+            failures.append("windowed: never served")
+
+        if alive:
+            # The crash took about eight seconds, so outliving the first
+            # request is not enough to call it up.
+            time.sleep(8)
+            held = proc.poll() is None
+            print(f"  {'ok  ' if held else 'FAIL'} still running 8s later"
+                  f"{'' if held else f' (exit {proc.returncode})'}")
+            if not held:
+                failures.append("windowed: died after starting")
+    finally:
+        _kill_tree(proc)
+    return failures
+
+
 def main() -> int:
     present = [(label, exe, port) for label, exe, port in TARGETS if exe.exists()]
     if not present:
@@ -167,6 +221,11 @@ def main() -> int:
     for label, exe, port in present:
         print(f"\n{label}: {exe.relative_to(ROOT)}")
         failures += check_bundle(label, exe, port)
+
+    # Once, on the folder build. The windowed path is the same code in both
+    # and the single file only wraps it, so running it twice buys nothing but
+    # another window in someone's face.
+    failures += check_window(present[0][1], 8743)
 
     print(f"\n{len(failures)} failure(s)")
     return 1 if failures else 0

@@ -27,6 +27,14 @@ from .app import Controller
 
 log = logging.getLogger(__name__)
 
+def _assets_dir() -> Path:
+    """Where icon.ico lives. Same bundle question as the ui folder."""
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        return Path(bundle) / "assets"
+    return Path(__file__).resolve().parent.parent / "assets"
+
+
 def _ui_dir() -> Path:
     """Where index.html, app.js and style.css actually are.
 
@@ -43,6 +51,7 @@ def _ui_dir() -> Path:
 
 
 UI_DIR = _ui_dir()
+ASSETS_DIR = _assets_dir()
 BOUNDARY = "frame"
 
 
@@ -76,6 +85,15 @@ def create_app(controller: Controller) -> FastAPI:
         )
 
     # -- state ---------------------------------------------------------
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        # The browser asks for this whether or not it is offered, and a 404 in
+        # the console of a dev UI is noise someone eventually chases.
+        icon = ASSETS_DIR / "icon.ico"
+        if not icon.exists():
+            raise HTTPException(status_code=404, detail="no icon")
+        return FileResponse(icon, media_type="image/x-icon")
 
     @app.get("/api/state")
     def state():

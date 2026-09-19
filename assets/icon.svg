@@ -1,0 +1,29 @@
+<!-- call-degrader. A video camera with a bolt struck through it.
+
+     The bolt is cut out of the camera with a fat stroke and then drawn back
+     in amber, so there is a gap of background either side of it. Without that
+     gap the two shapes touch and the icon reads as a camera with a sticker on
+     it rather than as one being interrupted.
+
+     assets/make_icon.py draws the same geometry with Pillow and writes the
+     .ico. This file is the reference and what to edit; nothing reads it at
+     build time. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <path id="bolt" d="M300 -10 L118 288 L252 288 L214 528 L406 212 L272 212 Z"/>
+    <mask id="cut">
+      <rect x="-40" y="-40" width="600" height="600" fill="#fff"/>
+      <use href="#bolt" fill="#000" stroke="#000" stroke-width="26"/>
+    </mask>
+  </defs>
+
+  <rect width="512" height="512" rx="102" fill="#12141a"/>
+
+  <g transform="translate(45,45) scale(0.824)">
+    <g fill="#6ea8ff" mask="url(#cut)">
+      <rect x="8" y="105" width="337" height="300" rx="62"/>
+      <path d="M375 192 L468 140 Q505 122 505 165 L505 347 Q505 390 468 372 L375 320 Z"/>
+    </g>
+    <use href="#bolt" fill="#ffc766"/>
+  </g>
+</svg>
