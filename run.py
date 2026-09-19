@@ -1,6 +1,7 @@
 """Entry point.
 
     python run.py                      # browser UI on http://127.0.0.1:8720
+    python run.py --window             # native window instead (the default in a build)
     python run.py --host 0.0.0.0       # reachable from a phone on the LAN
     python run.py --check              # probe devices and exit
     python run.py --no-audio           # video chain only
@@ -11,6 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 
 from src import preflight
 from src.app import Controller
@@ -30,6 +32,10 @@ def main() -> int:
                         help="use a generated test pattern instead of the camera")
     parser.add_argument("--no-audio", action="store_true")
     parser.add_argument("--no-video", action="store_true")
+    parser.add_argument("--window", action="store_true",
+                        help="native window instead of a browser tab (default when frozen)")
+    parser.add_argument("--no-window", action="store_true",
+                        help="browser tab even when frozen")
     parser.add_argument("--check", action="store_true", help="list devices and exit")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
@@ -76,6 +82,21 @@ def main() -> int:
     controller = Controller(settings)
     controller.start()
 
+    # A window from the exe, a browser tab from a checkout. Running the test
+    # suites should not pop a window up, and someone who built an exe did not
+    # do it to go on typing an address.
+    frozen = bool(getattr(sys, "frozen", False))
+    windowed = args.window or (frozen and not args.no_window)
+
+    try:
+        if windowed:
+            return _run_windowed(controller, args)
+        return _run_headless(controller, args)
+    finally:
+        controller.stop()
+
+
+def _run_headless(controller, args) -> int:
     import uvicorn
 
     from src.server import create_app
@@ -90,8 +111,62 @@ def main() -> int:
         )
     except KeyboardInterrupt:
         pass
-    finally:
-        controller.stop()
+    return 0
+
+
+def _run_windowed(controller, args) -> int:
+    """Native window over the same server.
+
+    The server goes on a thread because webview.start() has to own the main
+    one: on Windows the webview is COM and its message pump belongs to the
+    thread that created it. Closing the window returns from start(), which is
+    what shuts the server down, so there is one way out rather than two.
+    """
+    import threading
+
+    import uvicorn
+
+    from src.server import create_app
+
+    try:
+        import webview
+    except ImportError as exc:
+        print(f"no native window ({exc}), falling back to the browser", file=sys.stderr)
+        return _run_headless(controller, args)
+
+    host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+    config = uvicorn.Config(
+        create_app(controller), host=args.host, port=args.port, log_level="warning"
+    )
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, name="http", daemon=True)
+    thread.start()
+
+    # Pointing the window at a socket that is not listening yet gives a blank
+    # frame and no retry, so the window waits for the server rather than the
+    # other way round.
+    for _ in range(200):
+        if server.started:
+            break
+        time.sleep(0.05)
+    else:
+        print("the server did not come up, falling back to the browser", file=sys.stderr)
+
+    print(f"\n  UI in a window, and at http://{host}:{args.port}\n")
+    webview.create_window(
+        "call-degrader",
+        f"http://{host}:{args.port}",
+        width=1380,
+        height=900,
+        min_size=(900, 620),
+    )
+    try:
+        webview.start()
+    except KeyboardInterrupt:
+        pass
+
+    server.should_exit = True
+    thread.join(timeout=5.0)
     return 0
 
 

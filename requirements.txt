@@ -5,3 +5,5 @@ sounddevice==0.5.6
 pynput==1.8.2
 fastapi==0.141.1
 uvicorn[standard]==0.53.0
+# Native window over the same server. WebView2 on Windows, so no bundled browser.
+pywebview==6.2.1

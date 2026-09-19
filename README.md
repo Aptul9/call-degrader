@@ -67,6 +67,8 @@ Every normal start also runs a preflight before opening anything, and prints wha
 
 The interface is at `http://127.0.0.1:8720`.
 
+From a checkout that is a browser tab. A built exe opens a native window instead, over the same server: `pywebview` pointed at WebView2, which Windows 11 already has, so nothing bundles a browser. `--window` forces the window from a checkout and `--no-window` forces the tab from a build; the test suites use the latter so that running them does not put a window on your screen.
+
 In the call application, pick **OBS Virtual Camera** as the camera and **CABLE Output** as the microphone. The button under `audio routing` sets the system default microphone instead, for applications with no picker of their own; it needs the `AudioDeviceCmdlets` PowerShell module.
 
 | flag | default | what it does |
@@ -80,6 +82,7 @@ In the call application, pick **OBS Virtual Camera** as the camera and **CABLE O
 | `--cable` | `CABLE Input` | output device, matched on part of its name |
 | `--pattern` | | a generated test pattern instead of the camera |
 | `--no-audio`, `--no-video` | | run one chain only |
+| `--window`, `--no-window` | window when built, tab from source | override which one you get |
 | `--check` | | list devices and exit |
 
 ## Using it

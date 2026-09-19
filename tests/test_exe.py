@@ -47,7 +47,10 @@ def _boot(exe: Path, port: int):
     """Start it and wait for the first 200. Returns (process, seconds)."""
     started = time.monotonic()
     proc = subprocess.Popen(
-        [str(exe), "--port", str(port)],
+        # Frozen, the default is a native window. The suite drives HTTP,
+        # so it asks for the browser mode rather than popping a window
+        # up on whoever is running the tests.
+        [str(exe), "--port", str(port), "--no-window"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace",
     )

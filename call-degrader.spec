@@ -16,9 +16,14 @@ datas = [("ui", "ui")]
 binaries = []
 hiddenimports = []
 
-# sounddevice ships the PortAudio DLL as package data, and pyvirtualcam ships
-# the native backend the same way. Neither is found by following imports.
-for package in ("sounddevice", "pyvirtualcam"):
+# pyvirtualcam ships its native backend as package data, which no import
+# points at. sounddevice is deliberately absent from this list: it is a
+# module rather than a package, so collect_all skips it with a warning, and
+# PyInstaller's own hook brings the PortAudio DLL along anyway.
+# pywebview reaches WebView2 through pythonnet, which loads its CLR bridge
+# at runtime rather than importing it, so none of it is reachable by
+# following imports.
+for package in ("pyvirtualcam", "webview", "clr_loader", "pythonnet"):
     p_datas, p_binaries, p_hidden = collect_all(package)
     datas += p_datas
     binaries += p_binaries
