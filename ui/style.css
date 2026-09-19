@@ -148,6 +148,36 @@ main[hidden] { display: none; }
 .btn-rec.held { background: var(--rec); color: #1a0d0f; border-color: var(--rec); }
 .btn-quiet { color: var(--muted); }
 
+/* -- preflight --------------------------------------------------------
+   Neither driver ships with the tool. Missing one, everything still starts
+   and only the call is broken, so this sits above the tabs where it cannot
+   be missed and carries the command rather than a diagnosis. */
+.preflight { margin: 14px 20px 0; display: grid; gap: 8px; }
+.preflight[hidden] { display: none; }
+
+.preflight-row {
+  padding: 10px 13px;
+  border-radius: 8px;
+  border: 1px solid #6a5320;
+  background: #2a2318;
+}
+.preflight-row.blocker { border-color: #6a2b2b; background: #2b1a1a; }
+
+.preflight-what { margin: 0; font-size: 13px; color: var(--loop); }
+.preflight-row.blocker .preflight-what { color: var(--rec); }
+
+.preflight-fix {
+  margin: 7px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
 /* Top bar, pushed to the right of the status pills. These release a device
    rather than drive the loop, and they have to be reachable from either tab
    without hunting for the panel that happens to be open. */

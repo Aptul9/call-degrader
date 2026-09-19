@@ -55,6 +55,8 @@ python -m venv .venv
 
 `--check` lists the cameras, the audio devices, and whether the virtual camera is reachable. Run it first: it answers most of what goes wrong later.
 
+Every normal start also runs a preflight before opening anything, and prints what is missing with the command that fixes it. The same list appears as a banner at the top of the interface. It exists because neither driver ships with this tool, and without them the app still starts and the preview still moves, so the only symptom is a call that cannot see or hear you.
+
 ## Running
 
 ```
@@ -133,6 +135,8 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 ## Traps
 
 **Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene instead.
+
+**The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll`, and `current` is a scoop junction, so an OBS update keeps working and `scoop uninstall obs-studio` leaves the CLSID registered against a file that is gone: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair is the one that goes missing on its own, and it was found absent on the development machine after having been set and confirmed working. The preflight reports all three on every start, which is why it exists.
 
 **VB-CABLE device variants are not interchangeable, and the channel count is not what decides it.** Measured by writing a 440 Hz tone into each variant and reading it back: `CABLE Input` on MME carries; `CABLE Output` on MME returns one 16-bit LSB of dither; `CABLE Output` on WASAPI will not open (`PaErrorCode -9999`); several other pairings segfault PortAudio. The working playback device is the 16-channel MME one. The order used is in `src/audio.py`.
 

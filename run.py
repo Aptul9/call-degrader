@@ -12,6 +12,7 @@ import argparse
 import logging
 import sys
 
+from src import preflight
 from src.app import Controller
 from src.config import AudioSettings, Settings, VideoSettings
 
@@ -63,6 +64,14 @@ def main() -> int:
             output_device=args.cable,
         ),
     )
+
+    # Before anything opens a device. Both drivers this depends on are
+    # installed separately, and without this the app starts, the preview
+    # moves, and nothing says why the call cannot see or hear it.
+    findings = preflight.run(
+        want_video=not args.no_video, want_audio=not args.no_audio
+    )
+    print(preflight.report(findings), file=sys.stderr)
 
     controller = Controller(settings)
     controller.start()

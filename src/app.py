@@ -19,6 +19,7 @@ from .config import (
     match_preset,
 )
 from .hotkeys import Hotkeys
+from . import preflight
 from .state import LinkSimulator
 from .video import VideoPipeline, list_cameras
 
@@ -145,6 +146,12 @@ class Controller:
             "status": self.status(),
             "presets": list(PRESETS),
             "audio_presets": list(AUDIO_PRESETS),
+            # What is missing on this machine, so the page can say so
+            # instead of just failing quietly.
+            "preflight": [f.to_dict() for f in preflight.run(
+                want_video=self.settings.get().video.enabled,
+                want_audio=self.settings.get().audio.enabled,
+            )],
         }
 
     # -- passthroughs --------------------------------------------------

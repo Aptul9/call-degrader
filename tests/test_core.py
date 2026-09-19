@@ -237,6 +237,45 @@ def test_a_paused_card_is_never_mirrored():
         "the flip has to skip sources that draw their own frames"
 
 
+def test_preflight_names_a_fix_for_everything_it_reports():
+    """A finding without a command is a complaint, not a diagnosis."""
+    from src import preflight
+
+    findings = preflight.run()
+    for f in findings:
+        assert f.level in ("blocker", "warning"), f"unknown level {f.level!r}"
+        assert f.what.strip(), "a finding has to say what is wrong"
+        assert f.fix.strip(), f"no fix given for {f.what!r}"
+        assert f.to_dict()["what"] == f.what
+
+    # Blockers first, so the thing that stops a call working is read first.
+    levels = [f.level for f in findings]
+    assert levels == sorted(levels, key=lambda l: {"blocker": 0, "warning": 1}[l])
+
+
+def test_preflight_skips_a_chain_that_was_turned_off():
+    """--no-audio must not complain about a cable it will never open."""
+    from src import preflight
+
+    audio_only = preflight.run(want_video=False, want_audio=True)
+    video_only = preflight.run(want_video=True, want_audio=False)
+    assert not any("camera" in f.what.lower() for f in audio_only)
+    assert not any("cable" in f.what.lower() for f in video_only)
+
+
+def test_preflight_report_is_readable_when_everything_is_missing():
+    from src.preflight import Finding, report
+
+    text = report([
+        Finding("blocker", "no CABLE Input", "install VB-CABLE\nthen reboot"),
+        Finding("warning", "frame server off", "reg add ..."),
+    ])
+    assert "1 thing(s) will stop this working" in text
+    assert "!! no CABLE Input" in text
+    assert "install VB-CABLE" in text and "then reboot" in text
+    assert report([]).startswith("preflight: virtual camera, cable and camera all present")
+
+
 def test_link_is_reproducible_for_a_given_seed():
     def run():
         store = SettingsStore(Settings(link=LinkSettings(

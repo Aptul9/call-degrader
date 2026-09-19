@@ -279,6 +279,40 @@ function markAudioPreset(name) {
 // Every effect weight scales a reaction to a falling line. With the line off
 // they all multiply zero, so the sliders move and nothing happens. That is
 // exactly the trap this banner exists to close.
+// Both drivers are installed by hand and neither ships with the tool. Missing,
+// the app still starts and the preview still moves, so the only symptom is a
+// call that cannot see or hear you. Say which one is absent and what to type.
+function paintPreflight(findings) {
+  const box = $('preflight');
+  if (!box) return;
+  if (!findings || !findings.length) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+
+  box.innerHTML = '';
+  box.classList.toggle('has-blocker', findings.some((f) => f.level === 'blocker'));
+  for (const f of findings) {
+    const row = document.createElement('div');
+    row.className = `preflight-row ${f.level}`;
+
+    const what = document.createElement('p');
+    what.className = 'preflight-what';
+    what.textContent = f.what;
+    row.appendChild(what);
+
+    if (f.fix) {
+      const fix = document.createElement('pre');
+      fix.className = 'preflight-fix';
+      fix.textContent = f.fix;
+      row.appendChild(fix);
+    }
+    box.appendChild(row);
+  }
+  box.hidden = false;
+}
+
 // In the top bar beside the status pills, not inside a panel. They release a
 // device rather than drive either chain, and they get pressed mid-call from
 // whichever tab happens to be open.
@@ -922,6 +956,7 @@ function showError(message) {
   buildAudioPresets(state.audio_presets || []);
   markPreset(state.preset);
   markAudioPreset(state.audio_preset);
+  paintPreflight(state.preflight);
   render();
   wireTabs();
   wirePauses();
