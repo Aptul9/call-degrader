@@ -67,7 +67,7 @@ Every normal start also runs a preflight before opening anything, and prints wha
 
 The interface is at `http://127.0.0.1:8720`.
 
-A build also puts an icon in the system tray, with `open call-degrader`, `pause camera`, `pause microphone` and `quit`. The two pauses are why it is there: mid-call the window is behind the call client and those are the controls you reach for. The ticks are read fresh each time the menu opens, so they follow whatever was done in the window. Closing the window quits; the tray does not keep it alive, because a tray that failed to appear would then leave no way back in.
+A build also puts an icon in the system tray, with `open call-degrader`, `pause camera`, `pause microphone` and `quit`. The two pauses are why it is there: mid-call the window is behind the call client and those are the controls you reach for. The ticks are read fresh each time the menu opens, so they follow whatever was done in the window. Closing the window hides it and the chains keep feeding the call; `quit` on the tray is the only way out. If the tray fails to appear the close button keeps its usual meaning instead, because hiding a window with no tray behind it leaves a running process and no way back to it. The log says which of the two you got.
 
 From a checkout that is a browser tab. A built exe opens a native window instead, over the same server: `pywebview` pointed at WebView2, which Windows 11 already has, so nothing bundles a browser. `--window` forces the window from a checkout and `--no-window` forces the tab from a build; the test suites use the latter so that running them does not put a window on your screen.
 

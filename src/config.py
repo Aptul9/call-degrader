@@ -265,34 +265,52 @@ AUDIO_PRESETS: dict[str, dict] = {
             "warble_weight": 1.0, "metallic_weight": 0.8,
         },
     },
+    # Gaps, and a voice that is intact between them. The stall rate carries
+    # this one: with it at 8 a minute no stall landed inside speech over a
+    # 13 s take, so the preset named for chopping measured 0.000 silence.
     "choppy": {
         "link": {
             "enabled": True, "quality": 40.0, "ceiling": 55.0, "floor": 22.0,
-            "drift": 10.0, "stall_rate": 8.0, "stall_min": 0.2, "stall_max": 0.8,
+            "drift": 10.0, "stall_rate": 16.0, "stall_min": 0.2, "stall_max": 0.7,
         },
         "audio": {
-            "dropout_weight": 1.3, "stutter_weight": 1.5, "bitcrush_weight": 0.4,
+            "dropout_weight": 1.4, "stutter_weight": 1.6, "bitcrush_weight": 0.4,
             "warble_weight": 0.3, "metallic_weight": 0.2,
         },
     },
+    # Machine-voiced but still intelligible, so the comb leads and the
+    # bitcrush follows. Its sample-and-hold is a low-pass in disguise: at 1.6
+    # it took more top off than the comb put back and the preset named for a
+    # metallic ring measured below the clean take for high-frequency share.
     "robot": {
         "link": {
             "enabled": True, "quality": 26.0, "ceiling": 38.0, "floor": 12.0,
             "drift": 8.0, "stall_rate": 4.0, "stall_min": 0.2, "stall_max": 0.6,
         },
         "audio": {
-            "dropout_weight": 0.8, "stutter_weight": 2.0, "bitcrush_weight": 1.6,
-            "warble_weight": 0.5, "metallic_weight": 1.4,
+            "dropout_weight": 0.8, "stutter_weight": 2.0, "bitcrush_weight": 1.0,
+            "warble_weight": 0.5, "metallic_weight": 2.0,
         },
     },
+    # Dull and swimming, which is the opposite of robot: warble and crush
+    # lead, and the comb is nearly off because a metallic ring is the one
+    # thing underwater should not have.
+    #
+    # `bitcrush_weight` cannot separate the two things it does. Dropping
+    # bit depth adds harmonics and brightens; the sample-and-hold under it
+    # is a low-pass and dulls. One knob drives both, so neither this nor
+    # `robot` can be pushed to a high-frequency signature without moving
+    # the other one with it: measured 1.04x and 0.96x of the clean take
+    # against a target of clearly under and clearly over. Splitting them
+    # into two weights is the fix, and it is not a tuning change.
     "underwater": {
         "link": {
-            "enabled": True, "quality": 22.0, "ceiling": 34.0, "floor": 10.0,
-            "drift": 12.0, "stall_rate": 3.0, "stall_min": 0.3, "stall_max": 1.0,
+            "enabled": True, "quality": 18.0, "ceiling": 30.0, "floor": 8.0,
+            "drift": 12.0, "stall_rate": 4.0, "stall_min": 0.3, "stall_max": 1.0,
         },
         "audio": {
-            "dropout_weight": 0.5, "stutter_weight": 0.6, "bitcrush_weight": 2.0,
-            "warble_weight": 2.0, "metallic_weight": 1.6,
+            "dropout_weight": 0.6, "stutter_weight": 0.8, "bitcrush_weight": 2.0,
+            "warble_weight": 2.0, "metallic_weight": 0.4,
         },
     },
     "barely there": {

@@ -144,7 +144,19 @@ class AudioDegrader:
         return np.interp(src, idx, block).astype(np.float32)
 
     def _metallic(self, block: np.ndarray, sev: float, weight: float) -> np.ndarray:
-        """Feed-forward comb. Short delay, so it rings rather than echoes."""
+        """Feed-forward comb. Short delay, so it rings rather than echoes.
+
+        Normalised by 1 + g, and that is not tidiness. Added raw, the comb
+        peaks at 1 + g and the whole preset comes out louder than the voice
+        that went in: `underwater` measured 1.091 of the original level and a
+        higher peak than the source. A line in trouble does not get louder,
+        and on a call the far end hears that as someone leaning into the
+        microphone rather than as a connection failing.
+
+        Dividing through puts the peaks back at unity and leaves the notches
+        at (1 - g) / (1 + g), so the comb is still there, and the coefficient
+        can be raised to keep it audible after the division.
+        """
         strength = _curve(sev, weight, knee=0.5)
         if strength <= 0.0:
             self._delay[:] = 0.0
@@ -153,7 +165,8 @@ class AudioDegrader:
         delay = min(self.MAX_DELAY - 1, max(16, int(self.samplerate * 0.004)))
         history = np.concatenate([self._delay[-delay:], block])
         self._delay = history[-self.MAX_DELAY :].astype(np.float32)
-        return (block + history[:n] * np.float32(strength * 0.3)).astype(np.float32)
+        g = np.float32(strength * 0.45)
+        return ((block + history[:n] * g) / (np.float32(1.0) + g)).astype(np.float32)
 
     def _stalled(self, block: np.ndarray, link, audio_cfg) -> np.ndarray:
         """Nothing is getting through. Conceal briefly, then fall silent."""

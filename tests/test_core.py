@@ -544,6 +544,57 @@ def test_concealment_repeats_the_last_block_then_fades():
     assert np.abs(last).max() == 0.0, "concealment must give up rather than loop forever"
 
 
+def test_no_preset_comes_out_louder_than_it_went_in():
+    """A line in trouble does not get louder.
+
+    The comb was added raw, so it peaked at 1 + g and the whole preset gained
+    level: `underwater` measured 1.091 of the original and a higher peak than
+    the source, 0.671 against 0.597. On a call that reads as someone leaning
+    into the microphone, not as a connection failing.
+    """
+    from src.audio import AudioPipeline
+    from src.config import AUDIO_PRESETS
+
+    rng = np.random.default_rng(11)
+    blocksize = Settings().audio.blocksize
+    take = []
+    for i in range(300):
+        loud = (i % 50) < 34
+        tone = np.sin(np.linspace(0, 70, blocksize)).astype(np.float32)
+        take.append(((tone * (0.45 if loud else 0.002))
+                     + rng.normal(0, 0.004, blocksize)).astype(np.float32))
+    clean = np.concatenate(take)
+    clean_rms = float(np.sqrt((clean ** 2).mean()))
+    clean_peak = float(np.abs(clean).max())
+
+    for name in AUDIO_PRESETS:
+        store = SettingsStore()
+        cfg = store.apply_audio_preset(name)
+        out = AudioPipeline(store, None)._render(take, cfg)
+        rms = float(np.sqrt((out ** 2).mean()))
+        peak = float(np.abs(out).max())
+        assert rms <= clean_rms * 1.02, \
+            f"{name} is louder than the source: rms {rms:.4f} against {clean_rms:.4f}"
+        assert peak <= clean_peak * 1.02, \
+            f"{name} peaks above the source: {peak:.4f} against {clean_peak:.4f}"
+
+
+def test_the_comb_cannot_raise_the_level():
+    """Straight at the effect, so the guard does not depend on preset values."""
+    rng = np.random.default_rng(5)
+    block = rng.normal(0, 0.3, 480).astype(np.float32)
+
+    for weight in (0.5, 1.0, 2.0):
+        deg = AudioDegrader()
+        loudest = 0.0
+        for _ in range(40):
+            out = deg._metallic(block, 1.0, weight)
+            loudest = max(loudest, float(np.sqrt((out ** 2).mean())))
+        source = float(np.sqrt((block ** 2).mean()))
+        assert loudest <= source * 1.001, \
+            f"comb at weight {weight} gained level: {loudest:.4f} against {source:.4f}"
+
+
 def test_output_never_clips():
     deg = AudioDegrader()
     cfg = Settings().audio

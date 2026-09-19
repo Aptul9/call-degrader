@@ -232,18 +232,41 @@ def _run_windowed(controller, args) -> int:
     # The tray is where the two pause toggles are reachable from, with the
     # call client covering the screen. It is not required: start() says so and
     # the app carries on without one.
+    import threading as _threading
+
     from src.tray import Tray
+
+    quitting = _threading.Event()
 
     def show() -> None:
         window.show()
         window.restore()
 
+    def quit_app() -> None:
+        quitting.set()
+        window.destroy()
+
     # The .ico for this too, not the png. Pillow reads it and hands pystray
     # the 256px frame, so one file covers the exe, the window and the tray,
     # and there is one rule to remember rather than two.
-    tray = Tray(controller, _asset("icon.ico"), on_show=show, on_quit=window.destroy)
-    if not tray.start():
-        _say("  no tray icon, the window is the only way in")
+    tray = Tray(controller, _asset("icon.ico"), on_show=show, on_quit=quit_app)
+
+    if tray.start():
+        def on_closing() -> bool:
+            # Closing hides, so the chains keep feeding the call while the
+            # window is out of the way. Quit from the tray sets `quitting`
+            # first, and that is the only path that really ends it.
+            if quitting.is_set():
+                return True
+            window.hide()
+            return False
+
+        window.events.closing += on_closing
+        _say("  closing the window hides it, quit from the tray icon")
+    else:
+        # No tray means no way back from a hidden window, so the close button
+        # keeps its usual meaning rather than stranding a running process.
+        _say("  no tray icon, so closing the window quits")
 
     try:
         # The exe carries its own icon, but the window is drawn by WebView2

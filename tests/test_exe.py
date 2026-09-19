@@ -155,6 +155,38 @@ def check_bundle(label: str, exe: Path, port: int) -> list[str]:
     return failures
 
 
+def _windows_of(pid: int) -> list[int]:
+    """Visible top-level windows belonging to a process, by title."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _lparam):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                if "call-degrader" in buf.value:
+                    found.append(hwnd)
+        return True
+
+    user32.EnumWindows(each, 0)
+    return found
+
+
+def _close_window(hwnd: int) -> None:
+    """What the X button sends. Anything gentler skips the handler."""
+    import ctypes
+
+    ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+
+
 def _tray_in_log() -> str:
     """What the log says about the tray, for the run that is still going.
 
@@ -230,6 +262,36 @@ def check_window(exe: Path, port: int) -> list[str]:
             print(f"  {'ok  ' if tray else 'FAIL'} tray icon up  {tray or 'not in the log'}")
             if not tray:
                 failures.append("windowed: no tray icon")
+
+            # Closing has to hide, not quit, so the chains keep feeding a call
+            # while the window is out of the way. Only a real WM_CLOSE goes
+            # through the handler that decides which of the two happens.
+            hwnds = _windows_of(proc.pid)
+            print(f"  {'ok  ' if hwnds else 'FAIL'} window found  {len(hwnds)}")
+            if not hwnds:
+                failures.append("windowed: no window to close")
+            else:
+                _close_window(hwnds[0])
+                time.sleep(6)
+                survived = proc.poll() is None
+                print(f"  {'ok  ' if survived else 'FAIL'} survived the close"
+                      f"{'' if survived else f' (exit {proc.returncode})'}")
+                if not survived:
+                    failures.append("windowed: closing quit instead of hiding")
+                else:
+                    try:
+                        _get(base, "/", timeout=3)
+                        still = True
+                    except (urllib.error.URLError, OSError, TimeoutError):
+                        still = False
+                    print(f"  {'ok  ' if still else 'FAIL'} still serving once hidden")
+                    if not still:
+                        failures.append("windowed: stopped serving when hidden")
+
+                    hidden = not _windows_of(proc.pid)
+                    print(f"  {'ok  ' if hidden else 'FAIL'} window hidden")
+                    if not hidden:
+                        failures.append("windowed: the window is still on screen")
     finally:
         _kill_tree(proc)
     return failures
