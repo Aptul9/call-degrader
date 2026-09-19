@@ -21,68 +21,75 @@
 
 <main>
 
-  <section class="stage">
-    <div class="preview">
-      <img id="preview" src="/preview.mjpg" alt="camera preview">
-      <div id="stall-flash" class="stall-flash"></div>
-    </div>
+  <div class="preview">
+    <img id="preview" src="/preview.mjpg" alt="camera preview">
+    <div id="stall-flash" class="stall-flash"></div>
+  </div>
 
-    <div class="pedal">
-      <button id="btn-record" class="btn btn-rec">hold to record</button>
-      <button id="btn-live" class="btn">back to live</button>
-      <button id="btn-clear" class="btn btn-quiet">clear loop</button>
-    </div>
-    <p class="hint">
-      Hold the button or the record hotkey. The live feed keeps going out while you hold;
-      the loop starts when you let go.
-      <span id="hotkey-hint"></span>
-    </p>
+  <div class="pedal">
+    <button id="btn-record" class="btn btn-rec">hold to record</button>
+    <button id="btn-live" class="btn">back to live</button>
+    <button id="btn-clear" class="btn btn-quiet">clear loop</button>
+    <span class="meters">
+      <label>mic<span class="meter"><i id="meter-in"></i></span></label>
+      <label>out<span class="meter"><i id="meter-out"></i></span></label>
+    </span>
+  </div>
 
-    <div class="meters">
-      <label>mic in<span class="meter"><i id="meter-in"></i></span></label>
-      <label>cable out<span class="meter"><i id="meter-out"></i></span></label>
-    </div>
-  </section>
+  <!-- everything above the fold is what gets touched during a call -->
 
-  <section class="controls">
-
+  <section class="quick">
     <div class="presets" id="presets"></div>
 
-    <fieldset>
-      <legend>
-        the line
-        <label class="toggle"><input type="checkbox" data-path="link.enabled"><span>on</span></label>
-      </legend>
-      <div class="grid" id="group-link"></div>
-    </fieldset>
-
-    <fieldset>
-      <legend>video</legend>
-      <label class="field field-pick">
+    <div class="picks">
+      <label class="pick">
         <span>camera</span>
         <select id="camera-pick"></select>
-        <button id="btn-rescan" class="btn btn-quiet btn-small" type="button">rescan</button>
       </label>
-      <div class="grid" id="group-video"></div>
-    </fieldset>
+      <button id="btn-rescan" class="btn btn-quiet btn-small" type="button">rescan</button>
+      <label class="pick">
+        <span>loop style</span>
+        <select id="loop-pick"></select>
+      </label>
+    </div>
 
-    <fieldset>
-      <legend>audio</legend>
-      <div class="grid" id="group-audio"></div>
-      <div class="row">
-        <button id="btn-route" class="btn btn-quiet">point system mic at CABLE Output</button>
-        <span id="route-result" class="note"></span>
-      </div>
-    </fieldset>
+    <div class="checks" id="quick-checks"></div>
 
-    <fieldset>
-      <legend>pedal</legend>
-      <div class="grid" id="group-pedal"></div>
-    </fieldset>
-
-    <p class="note" id="errors"></p>
-
+    <p class="hint" id="hotkey-hint"></p>
   </section>
+
+  <!-- set once, then folded away -->
+
+  <details class="fold" data-fold="line">
+    <summary>line detail<span class="sub">quality band, stalls, delay</span></summary>
+    <div class="grid" id="group-link"></div>
+  </details>
+
+  <details class="fold" data-fold="video">
+    <summary>video effects<span class="sub">how hard each one reacts</span></summary>
+    <div class="grid" id="group-video"></div>
+  </details>
+
+  <details class="fold" data-fold="audio">
+    <summary>audio effects<span class="sub">how hard each one reacts</span></summary>
+    <div class="grid" id="group-audio"></div>
+  </details>
+
+  <details class="fold" data-fold="pedal">
+    <summary>pedal timing<span class="sub">recording length, crossfade, ghost opacity</span></summary>
+    <div class="grid" id="group-pedal"></div>
+  </details>
+
+  <details class="fold" data-fold="devices">
+    <summary>audio routing<span class="sub">point the system microphone at the cable</span></summary>
+    <div class="row">
+      <button id="btn-route" class="btn btn-quiet">point system mic at CABLE Output</button>
+      <span id="route-result" class="note"></span>
+    </div>
+    <div class="grid" id="group-devices"></div>
+  </details>
+
+  <p class="note" id="errors"></p>
 
 </main>
 

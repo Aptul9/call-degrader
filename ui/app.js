@@ -1,18 +1,32 @@
 // UI for call-degrader. No framework, no build step: this file is served as it
-// is written. Controls are generated from the spec below so adding a setting is
-// one line here plus one field in src/config.py.
+// is written.
+//
+// The split that matters: anything touched during a call stays on screen, and
+// anything set once lives in a fold. With all forty controls on screen at once,
+// the three that actually get used were lost among them.
 
+// Always visible. Section, field, label.
+const QUICK_CHECKS = [
+  ['link',  'enabled',      'bad line on'],
+  ['video', 'keep_colours', 'keep colours'],
+  ['video', 'mirror',       'mirror camera'],
+  ['pedal', 'ghost',        'ghost me under the loop'],
+  ['pedal', 'mute_on_loop', 'mute mic while looping'],
+  ['pedal', 'enabled',      'hotkeys on'],
+];
+
+// Folded away. field, label, min, max, step.
 const FIELDS = {
   link: [
-    ['quality',    'quality',            0, 100, 1],
-    ['ceiling',    'best it ever gets',  0, 100, 1],
-    ['floor',      'worst it ever gets', 0, 100, 1],
-    ['drift',      'wander',             0, 30,  0.5],
-    ['stall_rate', 'stalls per minute',  0, 30,  0.5],
-    ['stall_min',  'shortest stall (s)', 0, 5,   0.1],
-    ['stall_max',  'longest stall (s)',  0, 10,  0.1],
-    ['latency',    'extra delay (s)',    0, 3,   0.05],
-    ['desync',     'audio behind video (s)', -1, 1, 0.02],
+    ['quality',    'quality',                0, 100, 1],
+    ['ceiling',    'best it ever gets',      0, 100, 1],
+    ['floor',      'worst it ever gets',     0, 100, 1],
+    ['drift',      'wander',                 0, 30,  0.5],
+    ['stall_rate', 'stalls per minute',      0, 30,  0.5],
+    ['stall_min',  'shortest stall (s)',     0, 5,   0.1],
+    ['stall_max',  'longest stall (s)',      0, 10,  0.1],
+    ['latency',    'extra delay (s)',        0, 3,   0.05],
+    ['desync',     'audio behind video (s)', -1, 1,  0.02],
   ],
   video: [
     ['drop_weight',       'dropped frames',  0, 2, 0.05],
@@ -23,40 +37,33 @@ const FIELDS = {
     ['tearing_weight',    'tearing',         0, 2, 0.05],
   ],
   audio: [
-    ['dropout_weight',  'dropouts',      0, 2, 0.05],
+    ['dropout_weight',  'dropouts',       0, 2, 0.05],
     ['stutter_weight',  'packet stutter', 0, 2, 0.05],
-    ['bitcrush_weight', 'bitrate crush', 0, 2, 0.05],
-    ['warble_weight',   'pitch warble',  0, 2, 0.05],
-    ['metallic_weight', 'metallic ring', 0, 2, 0.05],
+    ['bitcrush_weight', 'bitrate crush',  0, 2, 0.05],
+    ['warble_weight',   'pitch warble',   0, 2, 0.05],
+    ['metallic_weight', 'metallic ring',  0, 2, 0.05],
   ],
   pedal: [
     ['max_seconds', 'max recording (s)', 1, 120, 1],
     ['min_seconds', 'min recording (s)', 0.2, 5, 0.1],
     ['crossfade',   'crossfade (s)',     0, 2, 0.05],
-    ['overlay',     'loop ghost in preview', 0, 1, 0.05],
+    ['overlay',     'ghost opacity',     0, 1, 0.05],
   ],
 };
 
-const SELECTS = {
-  pedal: [['loop_mode', 'loop style', [
-    ['bounce', 'bounce (plays back and forth, no join)'],
-    ['crossfade', 'crossfade (wraps, dissolves the join)'],
-  ]]],
+const FOLD_TOGGLES = {
+  devices: [['audio', 'monitor', 'monitor the processed sound on the speakers']],
 };
 
-const TOGGLES = {
-  video: [['keep_colours', 'keep colours (degrade brightness only)'], ['mirror', 'mirror the camera']],
-  audio: [['monitor', 'monitor on speakers']],
-  pedal: [
-    ['enabled', 'hotkeys on'],
-    ['mute_on_loop', 'mute mic while looping'],
-    ['ghost', 'ghost live camera under the loop (preview only)'],
-  ],
-};
+const LOOP_STYLES = [
+  ['bounce', 'bounce - plays back and forth, no join'],
+  ['crossfade', 'crossfade - wraps round, dissolves the join'],
+];
 
 const $ = (id) => document.getElementById(id);
 let settings = null;
 let pending = null;
+let activePreset = null;
 
 // -- talking to the server ---------------------------------------------
 
@@ -83,73 +90,81 @@ function patch(section, field, value) {
     pending = null;
     patch.queued = false;
     try {
-      const out = await send('/api/settings', payload);
-      settings = out.settings;
+      settings = (await send('/api/settings', payload)).settings;
+      if (payload.link) markPreset(null);  // a hand edit is no longer that preset
     } catch (err) {
       showError(err.message);
     }
   });
 }
 
-// -- building the controls ---------------------------------------------
+// -- controls ------------------------------------------------------------
 
-function buildGroup(section) {
-  const host = $(`group-${section}`);
-  host.innerHTML = '';
+function checkbox(section, field, label) {
+  const row = document.createElement('label');
+  row.className = 'toggle';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = Boolean(settings[section][field]);
+  box.addEventListener('change', () => patch(section, field, box.checked));
+  const text = document.createElement('span');
+  text.textContent = label;
+  row.append(box, text);
+  return row;
+}
 
-  for (const [field, label, min, max, step] of FIELDS[section] || []) {
-    const row = document.createElement('label');
-    row.className = 'field';
+function slider(section, field, label, min, max, step) {
+  const row = document.createElement('label');
+  row.className = 'field';
 
-    const name = document.createElement('span');
-    name.textContent = label;
+  const name = document.createElement('span');
+  name.textContent = label;
 
-    const input = document.createElement('input');
-    input.type = 'range';
-    Object.assign(input, { min, max, step, value: settings[section][field] });
+  const input = document.createElement('input');
+  input.type = 'range';
+  Object.assign(input, { min, max, step, value: settings[section][field] });
 
-    const out = document.createElement('output');
+  const out = document.createElement('output');
+  out.textContent = fmt(input.value);
+
+  input.addEventListener('input', () => {
     out.textContent = fmt(input.value);
+    patch(section, field, parseFloat(input.value));
+  });
 
-    input.addEventListener('input', () => {
-      out.textContent = fmt(input.value);
-      patch(section, field, parseFloat(input.value));
-    });
-
-    row.append(name, input, out);
-    host.appendChild(row);
-  }
-
-  for (const [field, label, options] of SELECTS[section] || []) {
-    const row = document.createElement('label');
-    row.className = 'field field-pick';
-    const name = document.createElement('span');
-    name.textContent = label;
-    const pick = document.createElement('select');
-    for (const [value, text] of options) pick.appendChild(new Option(text, value));
-    pick.value = settings[section][field];
-    pick.addEventListener('change', () => patch(section, field, pick.value));
-    row.append(name, pick);
-    host.appendChild(row);
-  }
-
-  for (const [field, label] of TOGGLES[section] || []) {
-    const row = document.createElement('label');
-    row.className = 'toggle';
-    const box = document.createElement('input');
-    box.type = 'checkbox';
-    box.checked = Boolean(settings[section][field]);
-    box.addEventListener('change', () => patch(section, field, box.checked));
-    const text = document.createElement('span');
-    text.textContent = label;
-    row.append(box, text);
-    host.appendChild(row);
-  }
+  row.append(name, input, out);
+  return row;
 }
 
 function fmt(value) {
   const n = parseFloat(value);
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+function buildQuick() {
+  const host = $('quick-checks');
+  host.innerHTML = '';
+  for (const [section, field, label] of QUICK_CHECKS) {
+    host.appendChild(checkbox(section, field, label));
+  }
+
+  const loop = $('loop-pick');
+  loop.innerHTML = '';
+  for (const [value, text] of LOOP_STYLES) loop.appendChild(new Option(text, value));
+  loop.value = settings.pedal.loop_mode;
+  loop.onchange = () => patch('pedal', 'loop_mode', loop.value);
+}
+
+function buildGroup(section) {
+  const host = $(`group-${section}`);
+  if (!host) return;
+  host.innerHTML = '';
+  for (const [field, label, min, max, step] of FIELDS[section] || []) {
+    host.appendChild(slider(section, field, label, min, max, step));
+  }
+  for (const [sec, field, label] of FOLD_TOGGLES[section] || []) {
+    host.appendChild(checkbox(sec, field, label));
+  }
 }
 
 // The picker lists DirectShow devices, so the chosen index is only meaningful
@@ -172,17 +187,13 @@ async function buildCameras() {
   }
 
   pick.disabled = false;
-  for (const cam of cameras) {
-    pick.appendChild(new Option(`${cam.index}: ${cam.name}`, String(cam.index)));
-  }
+  for (const cam of cameras) pick.appendChild(new Option(cam.name, String(cam.index)));
   const current = String(settings.video.camera);
   if (cameras.some((c) => String(c.index) === current)) pick.value = current;
 
   pick.onchange = async () => {
     const index = parseInt(pick.value, 10);
     if (Number.isNaN(index)) return;
-    settings.video.camera = index;
-    settings.video.backend = 'dshow';
     try {
       // Not through patch(): the video chain restarts on this, and the
       // coalescing there would let a second change race the restart.
@@ -200,9 +211,11 @@ function buildPresets(names) {
   for (const name of names) {
     const btn = document.createElement('button');
     btn.textContent = name.replace(/-/g, ' ');
+    btn.dataset.preset = name;
     btn.addEventListener('click', async () => {
       try {
         settings = (await send(`/api/preset/${name}`)).settings;
+        markPreset(name);
         render();
       } catch (err) {
         showError(err.message);
@@ -212,14 +225,41 @@ function buildPresets(names) {
   }
 }
 
-function render() {
-  for (const section of Object.keys(FIELDS)) buildGroup(section);
-  buildCameras();
-  const linkToggle = document.querySelector('[data-path="link.enabled"]');
-  linkToggle.checked = settings.link.enabled;
+function markPreset(name) {
+  activePreset = name;
+  for (const btn of document.querySelectorAll('#presets button')) {
+    btn.classList.toggle('on', btn.dataset.preset === name);
+  }
 }
 
-// -- pedal --------------------------------------------------------------
+function render() {
+  buildQuick();
+  for (const section of Object.keys(FIELDS)) buildGroup(section);
+  buildGroup('devices');
+  buildCameras();
+  markPreset(activePreset);
+}
+
+// -- folds remember whether they were open -------------------------------
+
+function wireFolds() {
+  for (const fold of document.querySelectorAll('.fold')) {
+    const key = `fold:${fold.dataset.fold}`;
+    try {
+      if (localStorage.getItem(key) === 'open') fold.open = true;
+    } catch (err) {
+      // Private windows and blocked site data throw on access. The folds then
+      // start closed, which is the sensible default anyway.
+    }
+    fold.addEventListener('toggle', () => {
+      try {
+        localStorage.setItem(key, fold.open ? 'open' : 'shut');
+      } catch (err) { /* nothing to do, and nothing worth saying */ }
+    });
+  }
+}
+
+// -- pedal ---------------------------------------------------------------
 
 function wirePedal() {
   const rec = $('btn-record');
@@ -262,12 +302,9 @@ function wirePedal() {
       note.classList.add('bad');
     }
   });
-
-  document.querySelector('[data-path="link.enabled"]')
-    .addEventListener('change', (e) => patch('link', 'enabled', e.target.checked));
 }
 
-// -- live status --------------------------------------------------------
+// -- live status ----------------------------------------------------------
 
 function wireStatus() {
   const socket = new WebSocket(`ws://${location.host}/ws`);
@@ -289,7 +326,7 @@ function paint(status) {
   setPill('pill-fps', `${status.video?.fps ?? 0} fps`, status.video?.running ? 'ok' : '');
 
   const vcam = status.video?.virtual_camera;
-  setPill('pill-vcam', vcam ? `cam: ${short(vcam)}` : 'no virtual camera', vcam ? 'ok' : 'warn');
+  setPill('pill-vcam', vcam ? short(vcam) : 'no virtual camera', vcam ? 'ok' : 'warn');
 
   const audio = status.audio || {};
   setPill('pill-audio', audio.running ? `audio ${audio.samplerate} Hz` : 'audio off',
@@ -319,15 +356,17 @@ function showError(message) {
   box.classList.add('bad');
 }
 
-// -- boot ---------------------------------------------------------------
+// -- boot -----------------------------------------------------------------
 
 (async function boot() {
   const state = await (await fetch('/api/state')).json();
   settings = state.settings;
   buildPresets(state.presets);
   render();
+  wireFolds();
   wirePedal();
   wireStatus();
   $('hotkey-hint').textContent =
-    ` Hotkeys: ${settings.pedal.record_key} to record, ${settings.pedal.live_key} to go live.`;
+    `Hold ${settings.pedal.record_key} to record, ${settings.pedal.live_key} to go live. `
+    + 'The hotkeys work while another window has focus.';
 })();

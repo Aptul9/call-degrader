@@ -77,16 +77,26 @@ def held_share(frames: list[np.ndarray]) -> float:
 
 
 def min_self_distance(frames: list[np.ndarray], gap: int = 15) -> float:
-    """Smallest difference between the first frame and any later one.
+    """Closest match between any two frames at least `gap` apart.
 
-    Near zero means the feed came back round to where it started, which is what
-    a loop does and what a scrolling live feed does not do inside this window.
+    Near zero means the feed revisited a moment it had already shown, which is
+    what a loop does and a live feed does not.
+
+    Comparing only against the first frame does not work across loop styles. A
+    crossfade loop wraps, so frame 0 comes round every ~45 frames; a bounce
+    turns around instead, giving a cycle of 2*(n-1) frames, and inside a
+    60-frame window frame 0 never returns even though the loop is plainly
+    repeating itself. Asking whether *any* moment recurs covers both.
+
+    Frames are shrunk first: this is quadratic in the frame count, and full
+    720p comparisons take longer than the capture did.
     """
-    first = frames[0]
-    later = [f for f in frames[gap:] if f.shape == first.shape]
-    if not later:
-        return float("inf")
-    return min(float(np.mean(cv2.absdiff(first, f))) for f in later)
+    small = [cv2.resize(f, (160, 90)) for f in frames]
+    best = float("inf")
+    for i, a in enumerate(small):
+        for b in small[i + gap:]:
+            best = min(best, float(np.mean(cv2.absdiff(a, b))))
+    return best
 
 
 def detail(frame: np.ndarray) -> float:
@@ -134,19 +144,22 @@ def measure(index: int, name: str, video: dict) -> int:
     preset("perfect")
 
     # -- the pedal, judged from the consumer side ---------------------
+    # The window has to cover a whole loop cycle, and a bounce cycle is twice
+    # the recording: a 36-frame clip turns at each end, so it repeats every
+    # 2*(36-1) = 70 frames. Capturing 60 of a 116-frame cycle can miss both
+    # turns entirely and report that a plainly looping feed never repeats.
+    # 1.2 s recorded, 90 captured, covers a full cycle whatever the phase.
+    #
     # The pattern scrolls 9 px a frame and takes about 142 frames to come back
-    # round, so inside a 60-frame window a live feed never repeats itself. A
-    # loop built from two seconds of it repeats every ~45 frames. Asking
-    # whether anything comes round again separates the two without needing to
-    # know which frame is which.
+    # round, so a live feed still never repeats inside the same window.
     pedal("clear")
-    live_repeat = min_self_distance(capture(index, 60, size=(1280, 720)))
+    live_repeat = min_self_distance(capture(index, 90, size=(1280, 720)))
 
     pedal("record-start")
-    time.sleep(2.0)
+    time.sleep(1.2)
     pedal("record-stop")
     time.sleep(1.0)
-    loop_repeat = min_self_distance(capture(index, 60, size=(1280, 720)))
+    loop_repeat = min_self_distance(capture(index, 90, size=(1280, 720)))
     pedal("live")
 
     print(f"\n  pedal seen from the far end: live closest repeat {live_repeat:7.2f}, "
