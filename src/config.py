@@ -154,9 +154,9 @@ PRESETS: dict[str, dict] = {
     "slightly-off": {
         "link": {
             "enabled": True,
-            "quality": 78.0,
-            "ceiling": 92.0,
-            "floor": 55.0,
+            "quality": 70.0,
+            "ceiling": 84.0,
+            "floor": 48.0,
             "drift": 6.0,
             "stall_rate": 1.5,
             "stall_min": 0.2,
@@ -170,9 +170,9 @@ PRESETS: dict[str, dict] = {
     "always-rough": {
         "link": {
             "enabled": True,
-            "quality": 32.0,
-            "ceiling": 40.0,
-            "floor": 24.0,
+            "quality": 40.0,
+            "ceiling": 50.0,
+            "floor": 30.0,
             "drift": 3.0,
             "stall_rate": 2.0,
             "stall_min": 0.3,
@@ -186,9 +186,9 @@ PRESETS: dict[str, dict] = {
     "never-perfect": {
         "link": {
             "enabled": True,
-            "quality": 50.0,
-            "ceiling": 68.0,
-            "floor": 15.0,
+            "quality": 48.0,
+            "ceiling": 64.0,
+            "floor": 20.0,
             "drift": 16.0,
             "stall_rate": 5.0,
             "stall_min": 0.3,
@@ -200,9 +200,9 @@ PRESETS: dict[str, dict] = {
     "bad-wifi": {
         "link": {
             "enabled": True,
-            "quality": 48.0,
-            "ceiling": 72.0,
-            "floor": 12.0,
+            "quality": 42.0,
+            "ceiling": 60.0,
+            "floor": 18.0,
             "drift": 14.0,
             "stall_rate": 6.0,
             "stall_min": 0.4,
@@ -214,9 +214,9 @@ PRESETS: dict[str, dict] = {
     "train-tunnel": {
         "link": {
             "enabled": True,
-            "quality": 22.0,
-            "ceiling": 45.0,
-            "floor": 0.0,
+            "quality": 25.0,
+            "ceiling": 40.0,
+            "floor": 8.0,
             "drift": 18.0,
             "stall_rate": 14.0,
             "stall_min": 0.8,
@@ -256,7 +256,7 @@ AUDIO_PRESETS: dict[str, dict] = {
     },
     "choppy": {
         "link": {
-            "enabled": True, "quality": 55.0, "ceiling": 72.0, "floor": 30.0,
+            "enabled": True, "quality": 40.0, "ceiling": 55.0, "floor": 22.0,
             "drift": 10.0, "stall_rate": 8.0, "stall_min": 0.2, "stall_max": 0.8,
         },
         "audio": {
@@ -266,7 +266,7 @@ AUDIO_PRESETS: dict[str, dict] = {
     },
     "robot": {
         "link": {
-            "enabled": True, "quality": 35.0, "ceiling": 48.0, "floor": 18.0,
+            "enabled": True, "quality": 26.0, "ceiling": 38.0, "floor": 12.0,
             "drift": 8.0, "stall_rate": 4.0, "stall_min": 0.2, "stall_max": 0.6,
         },
         "audio": {
@@ -276,7 +276,7 @@ AUDIO_PRESETS: dict[str, dict] = {
     },
     "underwater": {
         "link": {
-            "enabled": True, "quality": 30.0, "ceiling": 44.0, "floor": 14.0,
+            "enabled": True, "quality": 22.0, "ceiling": 34.0, "floor": 10.0,
             "drift": 12.0, "stall_rate": 3.0, "stall_min": 0.3, "stall_max": 1.0,
         },
         "audio": {

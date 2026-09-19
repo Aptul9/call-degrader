@@ -1,135 +1,141 @@
 # call-degrader
 
-A webcam loop pedal and a simulated bad connection, on one virtual camera and one virtual microphone. Hold a key to record a few seconds of yourself, let go and it loops as your camera. Independently, put the call on a line that drops frames, crushes the bitrate, freezes, stutters the audio and pulls it out of sync with the picture.
+Two things on one virtual camera and one virtual microphone, for a video call.
+
+**A loop pedal.** Hold a key, record a few seconds of yourself, let go, and it plays on repeat as your camera. Press another key to go back to live.
+
+**A bad connection.** Put the call on a line that drops frames, softens the picture, freezes, stutters the audio and pulls it out of sync. One simulated line drives the video and the audio together, which is what makes it read as a connection struggling rather than as two separate faults.
 
 Works with anything that reads a webcam and a microphone, desktop clients included: Zoom, Teams, Meet, Discord, Slack, OBS.
 
-## Why it exists
+## What you need to install
 
-The pieces exist separately. `haxybaxy/video-pedal` does the loop and nothing else. Zoom Escaper does audio sabotage in a browser tab and has not moved since 2021. FreezeCam and Bad Connection Simulator are browser extensions, so they cover web calls and not desktop clients. OBS with `obs-distort-filter` and a VST covers most of the degradation, but has no loop and no single control surface. Nothing covers the union, and nothing coordinates the audio and the video off one line state, which is what separates a convincing bad connection from two independently broken streams.
+| | why | notes |
+|---|---|---|
+| Windows 11, Python 3.11+ | | tested on Python 3.14.6 |
+| [VB-CABLE](https://vb-audio.com/Cable/) | the virtual microphone | run the installer as administrator, then reboot |
+| OBS Studio | the virtual camera | never opened; only its DirectShow filter is used |
 
-## Requirements
+### The virtual camera
 
-- Windows, Python 3.11 or newer. Tested on Windows 11 and Python 3.14.6.
-- [VB-CABLE](https://vb-audio.com/Cable/) for the virtual microphone.
-- OBS Studio for the virtual camera. It is never opened; what is needed is the DirectShow filter its package registers, which `pyvirtualcam` writes into.
-
-Without the camera driver the tool still runs and the audio chain still works. The video shows in the preview and goes nowhere else, and the status bar says so.
-
-### Installing the camera driver
+`pyvirtualcam` has no camera of its own on Windows. It writes into the driver that the OBS package registers.
 
 ```
 scoop install obs-studio
 ```
 
-Then, from an elevated prompt, once:
+Then once, from an **elevated** prompt:
 
 ```
 %USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\virtualcam-install.bat
 ```
 
-That registers CLSID `{A3FCE0F5-3493-419F-958A-ABA1250EC20B}` under `HKLM\SOFTWARE\Classes\CLSID`, in both the 32-bit and the 64-bit view. `virtualcam-uninstall.bat` in the same folder reverses it. The official OBS installer does the same thing in one step; the scoop route keeps OBS itself in the user directory.
+That registers CLSID `{A3FCE0F5-3493-419F-958A-ABA1250EC20B}` under `HKLM\SOFTWARE\Classes\CLSID`, in both the 64-bit and the 32-bit view. `virtualcam-uninstall.bat` beside it reverses this. The official OBS installer does the same job in one step; the scoop route keeps OBS itself inside your user directory.
 
-### Other backends
+Without this the tool still runs and the audio still works. The video appears in the preview and goes nowhere else, and the status bar says so.
 
-`pyvirtualcam` supports OBS and [Unity Capture](https://github.com/schellingb/UnityCapture) on Windows, OBS on macOS (OBS 30 or later on macOS 13 and up), and v4l2loopback on Linux. Unity Capture has not been pushed since May 2023 and carries 32 open issues.
+### Microsoft Teams needs one more thing
 
-Two maintained alternatives exist, neither of which `pyvirtualcam` drives, so either would mean writing the frame feed here: [softcam](https://github.com/tshino/softcam), MIT, Windows only, a DLL with `scCreateCamera` and `scSendFrame` reachable from `ctypes`, and [akvirtualcamera](https://github.com/webcamoid/akvirtualcamera), GPLv3, Windows and macOS, fed by piping raw frames to `AkVCamManager` on stdin.
+The new Teams reads the Windows Media Foundation frame server. The OBS virtual camera is a DirectShow filter and stays invisible to it until frame-server mode is switched on. From an elevated prompt, **then reboot**:
+
+```
+reg add "HKLM\SOFTWARE\Microsoft\Windows Media Foundation\Platform" /v EnableFrameServerMode /t REG_DWORD /d 1 /f
+reg add "HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows Media Foundation\Platform" /v EnableFrameServerMode /t REG_DWORD /d 1 /f
+```
+
+Teams in a browser tab works without any of this, because Chromium enumerates DirectShow devices directly.
 
 ## Setup
 
-```bash
+```
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt
 .venv/Scripts/python.exe run.py --check
 ```
 
-`--check` lists the cameras, the audio devices and whether the virtual camera is reachable. Run it first; it answers most of what goes wrong later.
+`--check` lists the cameras, the audio devices, and whether the virtual camera is reachable. Run it first: it answers most of what goes wrong later.
 
 ## Running
 
-```bash
+```
 .venv/Scripts/python.exe run.py
 ```
 
-The UI is at `http://127.0.0.1:8720`.
+The interface is at `http://127.0.0.1:8720`.
 
-In the call application, pick the virtual camera as the camera and `CABLE Output` as the microphone. The button in the UI sets the system default microphone instead, for applications that do not offer a picker; it needs the `AudioDeviceCmdlets` PowerShell module.
+In the call application, pick **OBS Virtual Camera** as the camera and **CABLE Output** as the microphone. The button under `audio routing` sets the system default microphone instead, for applications with no picker of their own; it needs the `AudioDeviceCmdlets` PowerShell module.
 
 | flag | default | what it does |
 |---|---|---|
-| `--host` | `127.0.0.1` | `0.0.0.0` makes the UI reachable from a phone on the same network |
+| `--host` | `127.0.0.1` | `0.0.0.0` reaches the interface from a phone on the same network |
 | `--port` | `8720` | |
 | `--camera` | `0` | camera index, as listed by `--check` |
 | `--size` | `1280x720` | |
 | `--fps` | `30` | |
-| `--mic` | system default | input device, matched on a fragment of its name |
-| `--cable` | `CABLE Input` | output device, matched on a fragment of its name |
-| `--pattern` | | generated test pattern instead of the camera |
+| `--mic` | system default | input device, matched on part of its name |
+| `--cable` | `CABLE Input` | output device, matched on part of its name |
+| `--pattern` | | a generated test pattern instead of the camera |
 | `--no-audio`, `--no-video` | | run one chain only |
 | `--check` | | list devices and exit |
 
-## The pedal
+## Using it
 
-Hold right Alt to record, release to loop, press right Ctrl to go back to live. The buttons in the UI do the same thing.
+Two tabs. **video** has the preview, the pedal and the line presets. **audio** has the recorder and its own presets. The line itself sits under both, because it drives both.
 
-Recording is hold-to-record, not press-to-start. The live feed keeps going out for as long as the key is down and the switch happens on release, so the moment you reach for the key is not inside the loop. Both seams are dissolved: the loop's own wrap-around is blended when the loop is built, and the cut between live and loop is crossfaded each time it happens.
+**Nothing happens until the line is on.** Every effect weight scales a reaction to a falling line, so with the line off they all multiply zero: the sliders move and the picture does not change. Tick **bad line on**, or click a preset. The panels say so when it is off.
 
-The preview ghosts the loop over the live camera at half opacity while a loop plays, so you can line yourself up before dropping back to live. That overlay never reaches the virtual camera.
+### The pedal
 
-Frames are held JPEG-encoded, about 2 MB per second of recording at 720p against about 80 MB raw.
+Hold right Alt to record, release to loop, press right Ctrl to go back to live. The buttons do the same. The hotkeys work while another window has focus, which is the point.
 
-## The line
+Recording is hold-to-record, not press-to-start: the live feed keeps going out while the key is down and the switch happens on release, so the moment you reach for the key is not inside the loop.
 
-One simulated link drives both chains. Its quality wanders around the set point as an Ornstein-Uhlenbeck walk, and stalls arrive on top as a Poisson process. Both chains read the same snapshot on the same clock, which is the part that matters: a freeze that does not line up with a dropout reads as two broken things rather than one bad connection.
+**Loop style.** `bounce` plays to the end and walks back, so every step lands on an adjacent recorded frame and there is no join at all. `crossfade` wraps round and dissolves over the join, which still has to travel from your last pose back to your first, so it reads as a reset with a fade over it. Bounce costs direction: half the cycle runs backwards, invisible on idle movement, obvious on anything with a clear direction.
 
-Presets: `perfect`, `slightly-off`, `bad-wifi`, `train-tunnel`, `about-to-drop`. Every effect also has its own weight, and a weight of zero turns that effect off.
+### Testing the audio
 
-**Video.** Dropped frames, held and decayed rather than blacked. Resolution collapse. JPEG round trip at falling quality, which produces real DCT blocking instead of a mosaic. Colour banding. Tearing between two frames. During a stall, the frozen picture is dragged block by block, so it smears the way a decoder does when it runs out of reference data.
+Hold **hold to record** and talk, release, and two players appear: your microphone, and what the call hears.
 
-**Audio.** Packet loss concealed by repeating the last block, which is the stutter everybody recognises; plain silence reads as a muted microphone instead. Bit depth and sample rate crush. Pitch warble from a jitter buffer resampling to keep up. A short comb filter for the metallic ring. Dropouts during a stall, after a brief window of concealment. Every gain change is ramped across the block, because an abrupt one clicks and a click sounds like broken software rather than a broken line.
+The processed side is rendered from the stored take when you ask for it, not captured during the recording. So change a preset or a slider, press **re-apply**, and hear the same words under the new settings. Recording again for every adjustment makes tuning by ear impossible.
 
-**Both.** Extra latency, and an audio-against-video desync knob in either direction.
+If the two sound identical, check the `mic peak` the panel reports. Two recordings of near-silence sound the same however hard the chain worked on one of them.
+
+### How hard it hits
+
+The response is squared, not linear: a call having a hard time, not a fault. Measured against a clean frame, the presets land at roughly 100%, 36%, 38%, 31% and 19% of the original edge detail, from `slightly-off` down to `about-to-drop`.
+
+Every effect also has its own weight, and a weight of zero turns it off.
+
+**Video.** Dropped frames, held and decayed rather than blacked. Resolution loss. A JPEG round trip, which gives real DCT blocking rather than a mosaic. Colour banding. Tearing. During a stall the frozen picture is dragged block by block, so it smears the way a decoder does when it runs out of reference data.
+
+**Audio.** Packet loss concealed by repeating the last block, which is the stutter everyone recognises; plain silence reads as a muted microphone instead. Bit depth and rate crush. Pitch warble. A short comb filter for the metallic ring. Dropouts during a stall, after a brief window of concealment.
+
+**Keep colours** is on by default: the chain degrades brightness and puts the original colour back. A starved codec really does wreck chroma, but the result is a picture whose colours crawl, which looks like a broken camera rather than a bad line.
 
 ## Tests
 
-Start the app in one terminal, then in another:
+Start the app, then in another terminal:
 
-```bash
+```
 .venv/Scripts/python.exe tests/run_all.py
 ```
 
-Or one at a time:
+`test_core` needs no hardware. The others measure the running chains: one through the preview stream, one by opening the virtual camera from a separate process the way a call client would, and two by playing a tone on the speakers and recording it back off the cable.
 
-```bash
-.venv/Scripts/python.exe tests/test_core.py            # no hardware needed
-.venv/Scripts/python.exe tests/test_video_path.py      # the chain, via the preview stream
-.venv/Scripts/python.exe tests/test_virtual_camera.py  # reads the virtual camera back
-.venv/Scripts/python.exe tests/test_cable_path.py      # needs the app on --mic "Stereo Mix"
-```
-
-`test_core.py` covers the link, the effects and the looper with no camera and no audio device.
-
-`test_virtual_camera.py` is the one that proves the tool reaches another application: it opens the virtual camera from a separate process the way a call client would, and checks the resolution, that the picture is the feed rather than an empty OBS scene, that degradation arrives, and that a loop repeats at the far end while a live feed does not.
-
-`test_cable_path.py` plays a tone on the speakers, lets the app pick it up through Stereo Mix, and records it back off `CABLE Output`, which is the device the call application would be using as its microphone.
-
-Each test that drives the app sets up what it needs and puts back what it found, so they can run in any order. The integration tests switch the source to the generated pattern for their measurements; a covered lens or a dark room produces an almost constant frame, and against that a dropped frame and a delivered one are indistinguishable.
+The two tone-based suites need the app started with `--mic "Stereo Mix"` and **audible speakers**. With the speakers muted they say so and skip, rather than failing as though the product were broken.
 
 ## Traps
 
-**Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene out instead.
+**Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene instead.
 
-**The consumer negotiates the capture format, not the sender.** OpenCV's DirectShow capture asks for 640x480 unless told otherwise, so reading the virtual camera back without setting `CAP_PROP_FRAME_WIDTH` and `CAP_PROP_FRAME_HEIGHT` returns downscaled frames and looks as though the tool is sending the wrong size.
+**VB-CABLE device variants are not interchangeable, and the channel count is not what decides it.** Measured by writing a 440 Hz tone into each variant and reading it back: `CABLE Input` on MME carries; `CABLE Output` on MME returns one 16-bit LSB of dither; `CABLE Output` on WASAPI will not open (`PaErrorCode -9999`); several other pairings segfault PortAudio. The working playback device is the 16-channel MME one. The order used is in `src/audio.py`.
 
-**Dropped frames cannot be counted off the preview stream.** It skips on purpose, sleeping 1/30 s between parts while the pipeline also runs at 30 fps, so a run of held frames can be sampled as a single one. The measured share swings between 0.03 and 0.33 for identical settings. Count them at a real capture device instead.
+**`sd.play` and `sd.rec` share one module-global stream.** Called from two threads, the second tears down the first one's stream while its callback is still running, and it segfaults rather than raising. Anything that plays and records at once needs explicit `OutputStream` and `InputStream` objects.
 
-**Randomised presets make flaky assertions.** `train-tunnel` stalls about 14 times a minute, so over a two-second window whether a stall lands at all is a coin toss. Tests that need a stall set the link explicitly rather than reaching for a preset.
+**MSMF and DirectShow do not share a camera index space.** An index is only meaningful alongside the backend it came from. The picker lists DirectShow devices and pins the backend when you choose one.
 
-**VB-CABLE device variants are not interchangeable.** Measured on this machine by writing a 440 Hz tone into each variant and reading it back: `CABLE Input` on MME carries, `CABLE Output` on MME returns one 16-bit LSB of dither and nothing else, `CABLE Output` on WASAPI refuses to open with `PaErrorCode -9999`, and several other pairings segfault PortAudio outright. The channel count is not the discriminator: the working playback device is the 16-channel MME one. The order used is in `src/audio.py`.
+**A worker thread must own its stop event.** Sharing one with its next incarnation means `start()` clears it before the old thread has noticed, and the old thread never exits, still holding the camera.
 
-**`sd.play` and `sd.rec` share one module-global stream.** Calling them from two threads makes the second tear down the first one's stream while its callback is still running, which segfaults rather than raising. Anything that plays and records at once needs explicit `OutputStream` and `InputStream` objects.
+**Dropped frames cannot be counted off a stream the consumer paces itself.** Both the preview and the virtual camera skip, so a run of held frames gets sampled as one. Edge detail measures the same thing without the noise.
 
-**The camera thread carries its own stop event.** One shared event gets cleared by the next `start()` before the previous thread has noticed it was asked to stop, and that thread then runs forever, still holding the camera and still writing preview frames over the new one's.
-
-**`video-pedal` has no licence file**, so it is all rights reserved. Nothing here is copied from it. The loop pedal is a ring buffer, a weighted blend and a three-state machine, written from the description.
+**`haxybaxy/video-pedal` has no licence file**, so it is all rights reserved. Nothing here is copied from it. The pedal is a ring buffer, a weighted blend and a three-state machine, written from the description.

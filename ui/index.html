@@ -89,6 +89,7 @@
 
       <div class="tester">
         <button id="btn-audio-test" class="btn btn-rec">hold to record</button>
+        <button id="btn-audio-replay" class="btn btn-quiet" type="button">re-apply</button>
         <span class="meters">
           <label>mic<span class="meter"><i id="meter-in"></i></span></label>
           <label>out<span class="meter"><i id="meter-out"></i></span></label>
@@ -96,7 +97,7 @@
       </div>
 
       <p class="inert" data-needs-link>the line is off, so both recordings will sound the same</p>
-      <p class="note" id="audio-test-note">Hold the button and talk. Release to stop.</p>
+      <p class="note" id="audio-test-note">Hold and talk. Then change the settings and press re-apply, no need to record again.</p>
 
       <div class="ab" id="audio-test-players" hidden>
         <label>your microphone<audio id="audio-before" controls preload="none"></audio></label>

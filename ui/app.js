@@ -442,6 +442,24 @@ function wireAudioTest() {
   btn.addEventListener('pointerdown', down);
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
+
+  // The processed side is rendered on demand from the stored raw take, so a
+  // settings change only needs the players pointed at it again. Re-recording
+  // to hear a slider move would make tuning by ear pointless.
+  $('btn-audio-replay').addEventListener('click', async () => {
+    const state = await (await fetch('/api/audio-test/status')).json();
+    if (!state.ready) {
+      note.textContent = 'record something first';
+      note.classList.add('bad');
+      return;
+    }
+    const stamp = Date.now();
+    $('audio-before').src = `/api/audio-test/before.wav?t=${stamp}`;
+    $('audio-after').src = `/api/audio-test/after.wav?t=${stamp}`;
+    players.hidden = false;
+    note.classList.remove('bad');
+    note.textContent = 'rebuilt from the same take with the current settings';
+  });
 }
 
 // -- live status ----------------------------------------------------------

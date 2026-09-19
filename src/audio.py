@@ -26,6 +26,7 @@ import numpy as np
 import sounddevice as sd
 
 from .audiofx import AudioDegrader, JitterBuffer
+from .config import SettingsStore
 
 log = logging.getLogger(__name__)
 
@@ -307,15 +308,49 @@ class AudioPipeline:
         }
 
     def capture_audio(self, side: str) -> tuple[np.ndarray, int] | None:
-        """The finished recording. `side` is "before" or "after"."""
+        """The finished recording. `side` is "before" or "after".
+
+        "after" is rendered from the raw side against whatever the settings say
+        right now, rather than handed back as it was processed during the
+        recording. That is the point: record yourself once, then move the
+        sliders and press play again. Re-recording every time you nudge a
+        weight makes tuning by ear impossible.
+        """
+        cfg = self._store.get()
         with self._tap_lock:
-            if not self._tap_ready:
+            if not self._tap_ready or not self._tap_raw:
                 return None
-            chunks = self._tap_raw if side == "before" else self._tap_out
-            if not chunks:
-                return None
-            data = np.concatenate(chunks)
-        return data, self._store.get().audio.samplerate
+            raw = list(self._tap_raw)
+
+        if side == "before":
+            return np.concatenate(raw), cfg.audio.samplerate
+        return self._render(raw, cfg), cfg.audio.samplerate
+
+    def _render(self, raw: list[np.ndarray], cfg) -> np.ndarray:
+        """Run the stored blocks back through a fresh chain.
+
+        The line is replayed from its own simulator rather than sampled live,
+        so pressing play twice on the same recording gives the same result and
+        a comparison between two settings is a comparison of the settings.
+        """
+        from .state import LinkSimulator
+
+        store = SettingsStore(cfg)
+        sim = LinkSimulator(store)
+        degrader = AudioDegrader(samplerate=cfg.audio.samplerate)
+        jitter = JitterBuffer(blocksize=cfg.audio.blocksize)
+
+        step = cfg.audio.blocksize / max(1, cfg.audio.samplerate)
+        now = 0.0
+        out_blocks = []
+        for block in raw:
+            now += step
+            snap = sim._advance(cfg.link, step, now)
+            processed = degrader.apply(block, snap, cfg.audio)
+            extra = snap.latency + max(0.0, snap.desync)
+            depth = int(extra * cfg.audio.samplerate / max(1, cfg.audio.blocksize))
+            out_blocks.append(jitter.push_pop(processed, depth))
+        return np.concatenate(out_blocks) if out_blocks else np.zeros(1, dtype=np.float32)
 
     def _on_output(self, outdata, frames, time_info, status) -> None:
         if status:

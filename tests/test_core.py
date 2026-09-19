@@ -153,12 +153,20 @@ def test_every_audio_preset_actually_changes_the_sound():
         store.apply_audio_preset(name)
         cfg = store.get()
 
+        # Let the line settle and run a while: one instant of a random walk is
+        # not what the preset sounds like, and with the softened curve a sample
+        # taken near the ceiling sits below every knee.
         sim = LinkSimulator(store)
-        snap = sim._advance(cfg.link, 0.01, 1.0)
+        now = 0.0
+        for _ in range(200):
+            now += 0.01
+            sim._advance(cfg.link, 0.01, now)
 
         deg = AudioDegrader()
         worst = 0.0
-        for _ in range(60):
+        for _ in range(400):
+            now += 0.01
+            snap = sim._advance(cfg.link, 0.01, now)
             out = deg.apply(tone, snap, cfg.audio)
             worst = max(worst, float(np.mean(np.abs(out - tone))))
 

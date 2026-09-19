@@ -23,13 +23,18 @@ BLOCK = 16  # macroblock edge in pixels, matches what H.264 would use
 def _curve(severity: float, weight: float, knee: float = 0.35) -> float:
     """Map severity to effect strength.
 
-    Nothing happens while the line is good, then it ramps. Without the knee
-    every effect is faintly on all the time, which reads as a bad camera rather
-    than a bad connection.
+    Squared, not linear. This is a camera feed going down a video call: the
+    picture is meant to look like a connection having a hard time, not like a
+    fault. A linear ramp meant the middle of the scale was already destroying
+    the image, so every preset short of the worst one looked the same and
+    looked wrong. Squaring leaves the top of the range where it was and pulls
+    the middle right down: at severity 0.55 the strength drops from 0.36 to
+    0.13, while at 0.95 it barely moves, 0.93 to 0.86.
     """
     if weight <= 0.0 or severity <= knee:
         return 0.0
-    return min(1.0, ((severity - knee) / (1.0 - knee)) * weight)
+    ramp = (severity - knee) / (1.0 - knee)
+    return min(1.0, ramp * ramp * weight)
 
 
 class VideoDegrader:
@@ -94,7 +99,9 @@ class VideoDegrader:
         if strength <= 0.0:
             return False
         # Up to 8 frames in 10 lost at the bottom of the scale.
-        return self._rng.random() < strength * 0.8
+        # Never more than a third of frames. Losing eight in ten is a frozen
+        # picture, not a struggling one.
+        return self._rng.random() < strength * 0.33
 
     def _resolution(self, frame: np.ndarray, sev: float, weight: float) -> np.ndarray:
         strength = _curve(sev, weight, knee=0.3)
@@ -102,7 +109,7 @@ class VideoDegrader:
             return frame
         h, w = frame.shape[:2]
         # Down to a sixth of the linear resolution at the worst.
-        factor = 1.0 - strength * 0.84
+        factor = 1.0 - strength * 0.55
         sw, sh = max(32, int(w * factor)), max(18, int(h * factor))
         small = cv2.resize(frame, (sw, sh), interpolation=cv2.INTER_AREA)
         return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
@@ -111,7 +118,7 @@ class VideoDegrader:
         strength = _curve(sev, weight, knee=0.15)
         if strength <= 0.0:
             return frame
-        quality = int(round(92 - strength * 90))  # 92 down to 2
+        quality = int(round(92 - strength * 60))  # 92 down to 32
         ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), max(1, quality)])
         if not ok:
             return frame
@@ -122,7 +129,7 @@ class VideoDegrader:
         strength = _curve(sev, weight, knee=0.45)
         if strength <= 0.0:
             return frame
-        bits = int(round(8 - strength * 5))  # 8 bits down to 3
+        bits = int(round(8 - strength * 3))  # 8 bits down to 5
         if bits >= 8:
             return frame
         step = 1 << (8 - bits)

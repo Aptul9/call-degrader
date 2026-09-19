@@ -20,9 +20,20 @@ import numpy as np
 
 
 def _curve(severity: float, weight: float, knee: float = 0.35) -> float:
+    """Map severity to effect strength.
+
+    Squared, not linear. This is a camera feed going down a video call: the
+    picture is meant to look like a connection having a hard time, not like a
+    fault. A linear ramp meant the middle of the scale was already destroying
+    the image, so every preset short of the worst one looked the same and
+    looked wrong. Squaring leaves the top of the range where it was and pulls
+    the middle right down: at severity 0.55 the strength drops from 0.36 to
+    0.13, while at 0.95 it barely moves, 0.93 to 0.86.
+    """
     if weight <= 0.0 or severity <= knee:
         return 0.0
-    return min(1.0, ((severity - knee) / (1.0 - knee)) * weight)
+    ramp = (severity - knee) / (1.0 - knee)
+    return min(1.0, ramp * ramp * weight)
 
 
 class AudioDegrader:
@@ -80,7 +91,7 @@ class AudioDegrader:
         strength = _curve(sev, weight, knee=0.2)
         if strength <= 0.0:
             return False
-        return self._rng.random() < strength * 0.7
+        return self._rng.random() < strength * 0.3
 
     def _concealed(self, n: int, audio_cfg) -> np.ndarray:
         """Repeat the last received block, quieter each time it repeats.
@@ -103,13 +114,13 @@ class AudioDegrader:
         strength = _curve(sev, weight, knee=0.3)
         if strength <= 0.0:
             return block
-        bits = max(2.0, 16.0 - strength * 13.0)
+        bits = max(5.0, 16.0 - strength * 9.0)
         steps = np.float32(2.0 ** (bits - 1))
         crushed = np.round(block * steps) / steps
 
         # Sample and hold, which is what a dropped sample rate really sounds
         # like. Down to a sixth of the rate at the worst.
-        hold = int(1 + round(strength * 5))
+        hold = int(1 + round(strength * 2))
         if hold > 1:
             n = len(crushed)
             trimmed = (n // hold) * hold
@@ -124,7 +135,7 @@ class AudioDegrader:
         if strength <= 0.0:
             return block
         n = len(block)
-        depth = strength * 0.06  # up to 6 percent rate error
+        depth = strength * 0.025  # up to 2.5 percent rate error
         rate = 2.0 * np.pi * 3.5 / self.samplerate  # 3.5 Hz wobble
         idx = np.arange(n, dtype=np.float32)
         offset = np.sin(self._phase + idx * rate).astype(np.float32) * (depth * n * 0.5)
@@ -142,7 +153,7 @@ class AudioDegrader:
         delay = min(self.MAX_DELAY - 1, max(16, int(self.samplerate * 0.004)))
         history = np.concatenate([self._delay[-delay:], block])
         self._delay = history[-self.MAX_DELAY :].astype(np.float32)
-        return (block + history[:n] * np.float32(strength * 0.55)).astype(np.float32)
+        return (block + history[:n] * np.float32(strength * 0.3)).astype(np.float32)
 
     def _stalled(self, block: np.ndarray, link, audio_cfg) -> np.ndarray:
         """Nothing is getting through. Conceal briefly, then fall silent."""
