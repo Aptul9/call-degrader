@@ -8,6 +8,26 @@ Two things on one virtual camera and one virtual microphone, for a video call.
 
 Works with anything that reads a webcam and a microphone, desktop clients included: Zoom, Teams, Meet, Discord, Slack, OBS.
 
+Windows only. It writes into the OBS virtual camera and VB-CABLE, and both of those are Windows drivers.
+
+## Download
+
+[**Latest release**](https://github.com/Aptul9/call-degrader/releases/latest) — a zip, no installer. Unzip it anywhere and run `call-degrader.exe`. It opens its own window and puts an icon in the tray; there is no console.
+
+It is unsigned, so the first run gets *Windows protected your PC* — **More info**, then **Run anyway**.
+
+**It will not work until you install the two drivers below.** The app starts either way and tells you which one is missing, with the command that fixes it, but a call will see nothing until they are there.
+
+Or run it from source, which needs Python 3.11+:
+
+```
+git clone https://github.com/Aptul9/call-degrader
+cd call-degrader
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe run.py
+```
+
 ## What you need to install
 
 | | why | notes |
@@ -198,3 +218,11 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 **Dropped frames cannot be counted off a stream the consumer paces itself.** Both the preview and the virtual camera skip, so a run of held frames gets sampled as one. Edge detail measures the same thing without the noise.
 
 **`haxybaxy/video-pedal` has no licence file**, so it is all rights reserved. Nothing here is copied from it. The pedal is a ring buffer, a weighted blend and a three-state machine, written from the description.
+
+## Licence
+
+GPL-2.0, because [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) is and there is no other way onto the virtual camera on Windows. Full text in [LICENSE](LICENSE).
+
+Everything bundled into the release build is listed in [THIRD-PARTY.md](THIRD-PARTY.md), including one real licence incompatibility that is written down there rather than left for someone else to find.
+
+Neither VB-CABLE nor the OBS driver is redistributed here. You install both yourself, from their own authors, under their own terms.
