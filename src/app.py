@@ -146,12 +146,18 @@ class Controller:
             "status": self.status(),
             "presets": list(PRESETS),
             "audio_presets": list(AUDIO_PRESETS),
-            # What is missing on this machine, so the page can say so
-            # instead of just failing quietly.
+            # What is missing on this machine, so the page can say so instead
+            # of just failing quietly.
+            #
+            # Notes are left out on purpose. They are things that used to
+            # matter and no longer do on a current machine, so on a working
+            # one they would put a banner on screen at every start that is
+            # always there and never actionable. They still go to the log,
+            # which is where someone looks when something is actually wrong.
             "preflight": [f.to_dict() for f in preflight.run(
                 want_video=self.settings.get().video.enabled,
                 want_audio=self.settings.get().audio.enabled,
-            )],
+            ) if f.level != "note"],
         }
 
     # -- passthroughs --------------------------------------------------

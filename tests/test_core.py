@@ -252,6 +252,9 @@ def test_the_window_icon_is_an_ico_not_a_png():
 
     body = inspect.getsource(run._run_windowed)
     assert '_asset("icon.ico")' in body, "the window icon has to be the .ico"
+    # Blunt on purpose. The tray takes the .ico as well, so nothing in this
+    # function has a reason to reach for the png, and a rule with one
+    # exception in it is a rule someone applies to the wrong call.
     assert "icon.png" not in body, "a png passed to the window is a silent process kill"
 
     ico = Path(__file__).resolve().parent.parent / "assets" / "icon.ico"
@@ -274,6 +277,25 @@ def test_preflight_names_a_fix_for_everything_it_reports():
     levels = [f.level for f in findings]
     rank = {"blocker": 0, "warning": 1, "note": 2}
     assert levels == sorted(levels, key=lambda l: rank[l])
+
+
+def test_notes_reach_the_log_but_not_the_banner():
+    """A banner that is always on is a banner nobody reads.
+
+    The Teams frame-server note fires on every start of a machine where the
+    camera and the microphone both work, because current Teams does not need
+    that switch. It stays in the report, which goes to the log, and stays out
+    of what the page renders.
+    """
+    from src.app import Controller
+    from src.preflight import Finding, report
+
+    text = report([Finding("note", "frame server mode is off", "reg add ...")])
+    assert "frame server mode is off" in text, "the log still gets it"
+
+    shown = Controller().full_state()["preflight"]
+    assert all(f["level"] != "note" for f in shown), \
+        f"a note reached the banner: {[f['what'][:40] for f in shown]}"
 
 
 def test_preflight_skips_a_chain_that_was_turned_off():

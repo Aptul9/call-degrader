@@ -24,7 +24,7 @@ hiddenimports = []
 # pywebview reaches WebView2 through pythonnet, which loads its CLR bridge
 # at runtime rather than importing it, so none of it is reachable by
 # following imports.
-for package in ("pyvirtualcam", "webview", "clr_loader", "pythonnet"):
+for package in ("pyvirtualcam", "webview", "clr_loader", "pythonnet", "pystray"):
     p_datas, p_binaries, p_hidden = collect_all(package)
     datas += p_datas
     binaries += p_binaries

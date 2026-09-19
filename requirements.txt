@@ -7,3 +7,6 @@ fastapi==0.141.1
 uvicorn[standard]==0.53.0
 # Native window over the same server. WebView2 on Windows, so no bundled browser.
 pywebview==6.2.1
+# Tray icon, and the Pillow it needs is also what draws assets/icon.ico.
+pystray==0.19.5
+pillow>=11.0

@@ -67,6 +67,8 @@ Every normal start also runs a preflight before opening anything, and prints wha
 
 The interface is at `http://127.0.0.1:8720`.
 
+A build also puts an icon in the system tray, with `open call-degrader`, `pause camera`, `pause microphone` and `quit`. The two pauses are why it is there: mid-call the window is behind the call client and those are the controls you reach for. The ticks are read fresh each time the menu opens, so they follow whatever was done in the window. Closing the window quits; the tray does not keep it alive, because a tray that failed to appear would then leave no way back in.
+
 From a checkout that is a browser tab. A built exe opens a native window instead, over the same server: `pywebview` pointed at WebView2, which Windows 11 already has, so nothing bundles a browser. `--window` forces the window from a checkout and `--no-window` forces the tab from a build; the test suites use the latter so that running them does not put a window on your screen.
 
 In the call application, pick **OBS Virtual Camera** as the camera and **CABLE Output** as the microphone. The button under `audio routing` sets the system default microphone instead, for applications with no picker of their own; it needs the `AudioDeviceCmdlets` PowerShell module.
@@ -136,8 +138,8 @@ One spec, two targets. **Use the folder unless one file on disk is worth more to
 
 | | size | processes | first HTTP 200 |
 |---|---|---|---|
-| `dist/call-degrader/` | 164.2 MB, 139 files | 1 | 1.06 s |
-| `dist/call-degrader-portable.exe` | 66.1 MB | 2 | 4.11 s |
+| `dist/call-degrader/` | 181.8 MB | 1 | 1.82 s |
+| `dist/call-degrader-portable.exe` | 75.4 MB | 2 | 4.13 s |
 
 The process count is what matters, not the seconds. The single file is a bootloader: it unpacks the whole bundle to a temp directory and runs the real application as a child. End the visible task and the child carries on, still serving, still holding the camera and the cable, with nothing on screen to say so. Measured: two processes, kill the parent, the survivor still answered HTTP 200.
 

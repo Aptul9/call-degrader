@@ -155,6 +155,25 @@ def check_bundle(label: str, exe: Path, port: int) -> list[str]:
     return failures
 
 
+def _tray_in_log() -> str:
+    """What the log says about the tray, for the run that is still going.
+
+    A frozen build writes to %LOCALAPPDATA%, which is the only channel the
+    tray has: it publishes no HTTP and the window says nothing about it.
+    """
+    import os
+
+    log = Path(os.environ.get("LOCALAPPDATA", "")) / "call-degrader" / "call-degrader.log"
+    if not log.exists():
+        return ""
+    for line in reversed(log.read_text(encoding="utf-8", errors="replace").splitlines()):
+        if "tray icon up" in line:
+            return line.split("src.tray:")[-1].strip()
+        if "no tray icon" in line:
+            return ""
+    return ""
+
+
 def check_window(exe: Path, port: int) -> list[str]:
     """Start it the way a double-click does, and see whether it stays up.
 
@@ -204,6 +223,13 @@ def check_window(exe: Path, port: int) -> list[str]:
                   f"{'' if held else f' (exit {proc.returncode})'}")
             if not held:
                 failures.append("windowed: died after starting")
+
+            # The tray is the only part of a build with no HTTP surface, so
+            # the log is the only thing that can say whether it came up.
+            tray = _tray_in_log()
+            print(f"  {'ok  ' if tray else 'FAIL'} tray icon up  {tray or 'not in the log'}")
+            if not tray:
+                failures.append("windowed: no tray icon")
     finally:
         _kill_tree(proc)
     return failures

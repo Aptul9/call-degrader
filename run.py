@@ -221,13 +221,30 @@ def _run_windowed(controller, args) -> int:
         _say("the server did not come up, falling back to the browser")
 
     _say(f"\n  UI in a window, and at http://{host}:{args.port}\n")
-    webview.create_window(
+    window = webview.create_window(
         "call-degrader",
         f"http://{host}:{args.port}",
         width=1380,
         height=900,
         min_size=(900, 620),
     )
+
+    # The tray is where the two pause toggles are reachable from, with the
+    # call client covering the screen. It is not required: start() says so and
+    # the app carries on without one.
+    from src.tray import Tray
+
+    def show() -> None:
+        window.show()
+        window.restore()
+
+    # The .ico for this too, not the png. Pillow reads it and hands pystray
+    # the 256px frame, so one file covers the exe, the window and the tray,
+    # and there is one rule to remember rather than two.
+    tray = Tray(controller, _asset("icon.ico"), on_show=show, on_quit=window.destroy)
+    if not tray.start():
+        _say("  no tray icon, the window is the only way in")
+
     try:
         # The exe carries its own icon, but the window is drawn by WebView2
         # and takes this one, so without it the taskbar entry is a generic
@@ -242,6 +259,8 @@ def _run_windowed(controller, args) -> int:
         webview.start(**({"icon": str(icon)} if icon else {}))
     except KeyboardInterrupt:
         pass
+    finally:
+        tray.stop()
 
     server.should_exit = True
     thread.join(timeout=5.0)
