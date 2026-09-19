@@ -129,14 +129,16 @@ Every effect also has its own weight, and a weight of zero turns it off.
 .venv/Scripts/python.exe -m PyInstaller --noconfirm --clean call-degrader.spec
 ```
 
-One spec, two targets, because the trade between them is real:
+One spec, two targets. **Use the folder unless one file on disk is worth more to you than the difference below.**
 
-| | size | first HTTP 200 | |
+| | size | processes | first HTTP 200 |
 |---|---|---|---|
-| `dist/call-degrader/` | 164.2 MB, 139 files | 1.06 s | a folder |
-| `dist/call-degrader-portable.exe` | 66.1 MB | 4.11 s | one file |
+| `dist/call-degrader/` | 164.2 MB, 139 files | 1 | 1.06 s |
+| `dist/call-degrader-portable.exe` | 66.1 MB | 2 | 4.11 s |
 
-The single file is a bootloader: it unpacks the whole bundle to a temp directory before running a line of Python, every launch. It does not get faster on the second run, measured at 4.10 s cold and 4.08 s warm.
+The process count is what matters, not the seconds. The single file is a bootloader: it unpacks the whole bundle to a temp directory and runs the real application as a child. End the visible task and the child carries on, still serving, still holding the camera and the cable, with nothing on screen to say so. Measured: two processes, kill the parent, the survivor still answered HTTP 200.
+
+Being a bootloader also costs the start time, and it never improves: 4.10 s cold against 4.08 s on the second run, because it re-extracts every launch.
 
 The console window is kept on purpose. It carries the preflight report, and without a tray icon it is how the app is stopped.
 
@@ -164,7 +166,7 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 
 **Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene instead.
 
-**A onefile bundle is a bootloader, so killing it kills the wrong process.** It unpacks itself and runs the real application as a child. `terminate()` on the launcher leaves that child holding the port, the camera and the virtual camera, and the only symptom is the next run connecting to the previous one: three were left behind that way and the test after them reported a 0.01 s cold start. Kill the tree, `taskkill /F /T /PID`.
+**A onefile bundle is a bootloader, so killing it kills the wrong process.** It unpacks itself and runs the real application as a child, and Task Manager shows two entries with the same name. End the visible one and the survivor keeps serving, keeps the port and keeps the camera and the cable, with nothing on screen: measured, the orphan still answered HTTP 200. The same thing bit the test harness, where `terminate()` left three behind and the next run reported a 0.01 s cold start because it had connected to the previous one. Kill the tree, `taskkill /F /T /PID`. The folder build is a single process and has none of this.
 
 **The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll`, and `current` is a scoop junction, so an OBS update keeps working and `scoop uninstall obs-studio` leaves the CLSID registered against a file that is gone: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair was found absent on the development machine after having been set earlier, and Teams went on listing both devices anyway, so current builds do not depend on it. The preflight reports all three on every start, the Teams one quietly as a note.
 
