@@ -623,8 +623,11 @@ function abStart(at) {
   }
 
   if (!AB.loop) {
+    // Back to the start, not left sitting on the last sample. Stopping at the
+    // end means the next press has nothing to play and looks like a dead
+    // button until you drag the playhead back yourself.
     const ender = AB.sources.after || AB.sources.before;
-    if (ender) ender.onended = () => { if (AB.playing) abPause(span); };
+    if (ender) ender.onended = () => { if (AB.playing) abPause(0); };
   }
 
   AB.startedAt = AB.ctx.currentTime - start;

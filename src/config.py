@@ -278,20 +278,6 @@ AUDIO_PRESETS: dict[str, dict] = {
             "warble_weight": 0.3, "metallic_weight": 0.2,
         },
     },
-    # Machine-voiced but still intelligible, so the comb leads and the
-    # bitcrush follows. Its sample-and-hold is a low-pass in disguise: at 1.6
-    # it took more top off than the comb put back and the preset named for a
-    # metallic ring measured below the clean take for high-frequency share.
-    "robot": {
-        "link": {
-            "enabled": True, "quality": 26.0, "ceiling": 38.0, "floor": 12.0,
-            "drift": 8.0, "stall_rate": 4.0, "stall_min": 0.2, "stall_max": 0.6,
-        },
-        "audio": {
-            "dropout_weight": 0.8, "stutter_weight": 2.0, "bitcrush_weight": 1.0,
-            "warble_weight": 0.5, "metallic_weight": 2.0,
-        },
-    },
     # Dull and swimming, which is the opposite of robot: warble and crush
     # lead, and the comb is nearly off because a metallic ring is the one
     # thing underwater should not have.
@@ -311,6 +297,40 @@ AUDIO_PRESETS: dict[str, dict] = {
         "audio": {
             "dropout_weight": 0.6, "stutter_weight": 0.8, "bitcrush_weight": 2.0,
             "warble_weight": 2.0, "metallic_weight": 0.4,
+        },
+    },
+    # Machine-voiced but still intelligible, so the comb leads and the
+    # bitcrush follows. Its sample-and-hold is a low-pass in disguise: at 1.6
+    # it took more top off than the comb put back and the preset named for a
+    # metallic ring measured below the clean take for high-frequency share.
+    #
+    # Sits after `underwater` because it is the harsher of the two, which the
+    # names do not tell you: measured on one take, underwater keeps 0.786 of
+    # the waveform and robot 0.715. The row is read left to right as a ladder,
+    # so it is ordered like one.
+    "robot": {
+        "link": {
+            "enabled": True, "quality": 26.0, "ceiling": 38.0, "floor": 12.0,
+            "drift": 8.0, "stall_rate": 4.0, "stall_min": 0.2, "stall_max": 0.6,
+        },
+        "audio": {
+            "dropout_weight": 0.8, "stutter_weight": 2.0, "bitcrush_weight": 1.0,
+            "warble_weight": 0.5, "metallic_weight": 2.0,
+        },
+    },
+    # Between `robot` and `barely there`, and it exists because there was
+    # nothing there. Robot leaves the voice whole and barely there takes about
+    # 39 percent of a phrase away, which is too much to hold a conversation
+    # over. This interrupts without swallowing sentences: 0.156 silent on
+    # average, 0.246 on the worst of twelve draws.
+    "half there": {
+        "link": {
+            "enabled": True, "quality": 20.0, "ceiling": 36.0, "floor": 10.0,
+            "drift": 10.0, "stall_rate": 24.0, "stall_min": 0.25, "stall_max": 0.9,
+        },
+        "audio": {
+            "dropout_weight": 1.4, "stutter_weight": 1.5, "bitcrush_weight": 1.2,
+            "warble_weight": 0.9, "metallic_weight": 0.8,
         },
     },
     # Stalls come often and short rather than rarely and long, and that is
