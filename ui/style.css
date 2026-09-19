@@ -56,20 +56,33 @@ h1 {
 .pill.warn { color: var(--loop); border-color: #6a5320; }
 .pill.bad  { color: var(--rec);  border-color: #6a2b2b; }
 
-/* One column under the tabs. The controls that belong to what is on screen sit
-   directly under it, which is the whole point of the tabs: a second column only
-   ever put half of them somewhere the eye does not go. */
+/* Two columns. Left: what is being looked at, and the one panel of controls
+   that go with it. Right: everything that gets set once.
+   Both tracks start at minmax(0, ...) so neither can push the other off the
+   side of the window, whatever the width. */
 main {
-  max-width: 940px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  max-width: 1500px;
   margin: 0 auto;
-  padding: 16px 20px 60px;
+  padding: 14px 20px 40px;
+}
+
+main[hidden] { display: none; }
+
+.col { min-width: 0; }
+
+@media (max-width: 860px) {
+  main { grid-template-columns: minmax(0, 1fr); }
 }
 
 .tabs {
   display: flex;
   gap: 2px;
-  max-width: 940px;
-  margin: 16px auto 0;
+  max-width: 1500px;
+  margin: 14px auto 0;
   padding: 0 20px;
 }
 
@@ -88,7 +101,7 @@ main {
 .tab:hover { color: var(--text); }
 .tab.on { background: var(--panel); color: var(--text); border-color: var(--line); }
 
-main > .panel { margin-bottom: 10px; }
+.errors { max-width: 1500px; margin: 0 auto 30px; padding: 0 20px; }
 
 /* -- stage ------------------------------------------------------------ */
 
@@ -276,8 +289,15 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 .inert[hidden] { display: none; }
 
-.tester { padding: 0; margin-top: 14px; }
+.tester {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
 .tester .meters { margin-left: auto; }
+.tester .btn-rec.held { background: var(--rec); color: #1a0d0f; border-color: var(--rec); }
 
 .note { color: var(--muted); font-size: 12px; margin-top: 14px; }
 .note.bad { color: var(--rec); }

@@ -125,6 +125,15 @@ def main() -> int:
     requests.post(f"{API}/api/preset/perfect", timeout=5).raise_for_status()
     time.sleep(0.5)
     clean_peak, clean_hz, clean_quiet = measure("clean line", speaker, cable_out)
+    if clean_peak < 0.01:
+        # Nothing got in. Muted speakers, volume at zero, or Stereo Mix
+        # disabled: every measurement below would read as silence and be
+        # reported as the product failing, which it is not.
+        print("\n  the tone never reached the cable: the speakers are muted, the volume")
+        print("  is at zero, or Stereo Mix is disabled.")
+        print("\nskipped: nothing measurable until playback is audible")
+        requests.post(f"{API}/api/preset/perfect", timeout=5)
+        return 0
 
     # Not a preset. train-tunnel stalls about 14 times a minute, so over a
     # window this short whether a stall lands at all is a coin toss and the

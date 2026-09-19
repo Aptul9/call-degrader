@@ -160,15 +160,21 @@ function buildQuick() {
   loop.onchange = () => patch('pedal', 'loop_mode', loop.value);
 }
 
+// The line fold is shown under both tabs, so its rows go to every matching
+// host rather than to one id. Each host gets its own control objects; sharing
+// one node between two panels would move it instead of copying it.
 function buildGroup(section) {
-  const host = $(`group-${section}`);
-  if (!host) return;
-  host.innerHTML = '';
-  for (const [field, label, min, max, step] of FIELDS[section] || []) {
-    host.appendChild(slider(section, field, label, min, max, step));
-  }
-  for (const [sec, field, label] of FOLD_TOGGLES[section] || []) {
-    host.appendChild(checkbox(sec, field, label));
+  const hosts = [
+    ...document.querySelectorAll(`#group-${section}, [data-group="${section}"]`),
+  ];
+  for (const host of hosts) {
+    host.innerHTML = '';
+    for (const [field, label, min, max, step] of FIELDS[section] || []) {
+      host.appendChild(slider(section, field, label, min, max, step));
+    }
+    for (const [sec, field, label] of FOLD_TOGGLES[section] || []) {
+      host.appendChild(checkbox(sec, field, label));
+    }
   }
 }
 
@@ -363,34 +369,53 @@ function wirePedal() {
 // microphone and "after" is the exact block written to the cable. They will not
 // be sample-aligned when the line has latency or desync set: that delay is part
 // of what the far end gets, so it is left in rather than corrected for.
+// Hold to record, the same gesture as the video pedal. A fixed countdown meant
+// guessing when to talk; holding puts the start and the end where the speaking
+// is.
 function wireAudioTest() {
   const btn = $('btn-audio-test');
-  const secs = $('audio-test-secs');
   const note = $('audio-test-note');
   const players = $('audio-test-players');
+  let held = false;
+  let ticker = null;
 
-  btn.addEventListener('click', async () => {
-    const seconds = parseFloat(secs.value);
-    btn.disabled = true;
-    note.classList.remove('bad');
+  const down = async (event) => {
+    event.preventDefault();
+    if (held) return;
+    held = true;
+    btn.classList.add('held');
     players.hidden = true;
+    note.classList.remove('bad');
 
     try {
-      const started = await send('/api/audio-test/start', { seconds });
+      const started = await send('/api/audio-test/start');
       if (started.ok === false) throw new Error(started.error);
-
-      for (let left = seconds; left > 0; left -= 1) {
-        note.textContent = `recording, ${Math.ceil(left)}s left - talk now`;
-        await new Promise((done) => setTimeout(done, 1000));
-      }
-      note.textContent = 'writing...';
-
-      // Poll rather than trust the countdown: the capture finishes on block
-      // count, and the audio callback is not on this clock.
-      for (let tries = 0; tries < 40; tries += 1) {
+      const warn = started.link_on ? '' : '  (the line is off, both sides will match)';
+      ticker = setInterval(async () => {
         const state = await (await fetch('/api/audio-test/status')).json();
-        if (state.ready) break;
-        await new Promise((done) => setTimeout(done, 100));
+        note.textContent = `recording ${state.seconds.toFixed(1)}s, `
+          + `mic peak ${state.peak_in.toFixed(3)}${warn}`;
+      }, 200);
+    } catch (err) {
+      held = false;
+      btn.classList.remove('held');
+      note.textContent = err.message;
+      note.classList.add('bad');
+    }
+  };
+
+  const up = async () => {
+    if (!held) return;
+    held = false;
+    btn.classList.remove('held');
+    clearInterval(ticker);
+
+    try {
+      const done = await send('/api/audio-test/stop');
+      if (!done.captured) {
+        note.textContent = 'nothing captured, hold the button a little longer';
+        note.classList.add('bad');
+        return;
       }
 
       // The query string is what makes the browser refetch rather than replay
@@ -399,14 +424,24 @@ function wireAudioTest() {
       $('audio-before').src = `/api/audio-test/before.wav?t=${stamp}`;
       $('audio-after').src = `/api/audio-test/after.wav?t=${stamp}`;
       players.hidden = false;
-      note.textContent = `${seconds}s captured`;
+
+      // Two recordings of near-silence sound identical however hard the chain
+      // worked on one of them, so a quiet microphone gets said out loud rather
+      // than left to look like a broken effect.
+      const quiet = done.peak_in < 0.02;
+      note.textContent = `${done.seconds.toFixed(1)}s captured, mic peak `
+        + `${done.peak_in.toFixed(3)}, out peak ${done.peak_out.toFixed(3)}`
+        + (quiet ? ' - the microphone barely heard anything, so both will sound empty' : '');
+      note.classList.toggle('bad', quiet);
     } catch (err) {
       note.textContent = err.message;
       note.classList.add('bad');
-    } finally {
-      btn.disabled = false;
     }
-  });
+  };
+
+  btn.addEventListener('pointerdown', down);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 // -- live status ----------------------------------------------------------

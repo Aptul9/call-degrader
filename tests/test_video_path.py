@@ -20,7 +20,9 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from harness import API, pedal, preset, require_running, source  # noqa: E402
+from harness import (  # noqa: E402
+    API, patch, pedal, preset, require_running, source, wait_link_below,
+)
 
 BOUNDARY = b"--frame"
 
@@ -108,11 +110,18 @@ def measure() -> int:
     print(f"  clean line     frames {len(clean):>3}   held {clean_held:6.3f}   "
           f"detail {clean_detail:8.1f}")
 
-    preset("train-tunnel")
-    bad = grab(40)
+    # Explicit, not a preset. train-tunnel is stochastic: Poisson stalls on top
+    # of a random walk, measured over a 1.3 s window. It lands on a good moment
+    # often enough that the assertion failed roughly one run in three, with
+    # detail coming back at 1995 against the usual 150.
+    patch({"link": {"enabled": True, "quality": 4.0, "ceiling": 12.0, "floor": 0.0,
+                    "drift": 3.0, "stall_rate": 120.0, "stall_min": 0.4, "stall_max": 0.9,
+                    "latency": 0.0, "desync": 0.0}})
+    wait_link_below(20.0)
+    bad = grab(60)
     bad_held = held_share(bad)
     bad_detail = float(np.median([detail(f) for f in bad]))
-    print(f"  train tunnel   frames {len(bad):>3}   held {bad_held:6.3f}   "
+    print(f"  degraded line  frames {len(bad):>3}   held {bad_held:6.3f}   "
           f"detail {bad_detail:8.1f}")
 
     preset("perfect")

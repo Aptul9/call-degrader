@@ -24,11 +24,11 @@
   <button class="tab" data-tab="audio">audio</button>
 </nav>
 
-<main>
+<!-- VIDEO: preview and the controls that go with it on the left,
+     everything set once on the right -->
+<main class="panel" data-panel="video">
 
-  <!-- VIDEO -->
-  <section class="panel" data-panel="video">
-
+  <div class="col">
     <div class="preview">
       <img id="preview" src="/preview.mjpg" alt="camera preview">
       <div id="stall-flash" class="stall-flash"></div>
@@ -58,7 +58,9 @@
       <div class="checks" id="quick-checks"></div>
       <p class="hint" id="hotkey-hint"></p>
     </div>
+  </div>
 
+  <div class="col">
     <details class="fold" data-fold="video">
       <summary>video effects<span class="sub">how hard each one reacts</span></summary>
       <p class="inert" data-needs-link>the line is off, so these do nothing yet</p>
@@ -66,38 +68,44 @@
     </details>
 
     <details class="fold" data-fold="pedal">
-      <summary>pedal timing<span class="sub">recording length, crossfade, ghost opacity</span></summary>
+      <summary>pedal timing<span class="sub">recording length, crossfade, ghost</span></summary>
       <div class="grid" id="group-pedal"></div>
     </details>
 
-  </section>
+    <details class="fold" data-fold="line-v">
+      <summary>the line<span class="sub">drives video and audio together</span></summary>
+      <div class="grid" data-group="link"></div>
+    </details>
+  </div>
 
-  <!-- AUDIO -->
-  <section class="panel" data-panel="audio" hidden>
+</main>
 
+<!-- AUDIO: the recorder and its presets on the left, the rest on the right -->
+<main class="panel" data-panel="audio" hidden>
+
+  <div class="col">
     <div class="quick">
       <div class="presets" id="audio-presets"></div>
 
-      <div class="row tester">
-        <button id="btn-audio-test" class="btn">record</button>
-        <select id="audio-test-secs" class="secs">
-          <option value="3">3 s</option>
-          <option value="5" selected>5 s</option>
-          <option value="10">10 s</option>
-        </select>
+      <div class="tester">
+        <button id="btn-audio-test" class="btn btn-rec">hold to record</button>
         <span class="meters">
           <label>mic<span class="meter"><i id="meter-in"></i></span></label>
           <label>out<span class="meter"><i id="meter-out"></i></span></label>
         </span>
       </div>
-      <p class="note" id="audio-test-note">Record a few seconds, then compare the two.</p>
+
+      <p class="inert" data-needs-link>the line is off, so both recordings will sound the same</p>
+      <p class="note" id="audio-test-note">Hold the button and talk. Release to stop.</p>
 
       <div class="ab" id="audio-test-players" hidden>
         <label>your microphone<audio id="audio-before" controls preload="none"></audio></label>
         <label>what the call hears<audio id="audio-after" controls preload="none"></audio></label>
       </div>
     </div>
+  </div>
 
+  <div class="col">
     <details class="fold" data-fold="audio">
       <summary>audio effects<span class="sub">how hard each one reacts</span></summary>
       <p class="inert" data-needs-link>the line is off, so these do nothing yet</p>
@@ -105,7 +113,7 @@
     </details>
 
     <details class="fold" data-fold="devices">
-      <summary>audio routing<span class="sub">point the system microphone at the cable</span></summary>
+      <summary>audio routing<span class="sub">point the system mic at the cable</span></summary>
       <div class="row">
         <button id="btn-route" class="btn btn-quiet">point system mic at CABLE Output</button>
         <span id="route-result" class="note"></span>
@@ -113,17 +121,15 @@
       <div class="grid" id="group-devices"></div>
     </details>
 
-  </section>
-
-  <!-- shared: the line drives both chains, so it sits under both tabs -->
-  <details class="fold" data-fold="line">
-    <summary>the line<span class="sub">drives video and audio together</span></summary>
-    <div class="grid" id="group-link"></div>
-  </details>
-
-  <p class="note" id="errors"></p>
+    <details class="fold" data-fold="line-a">
+      <summary>the line<span class="sub">drives video and audio together</span></summary>
+      <div class="grid" data-group="link"></div>
+    </details>
+  </div>
 
 </main>
+
+<p class="note errors" id="errors"></p>
 
 <script src="/static/app.js"></script>
 </body>

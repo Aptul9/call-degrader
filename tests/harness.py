@@ -100,6 +100,26 @@ def wait_audio_ready(timeout: float = 20.0) -> bool:
     return False
 
 
+def wait_link_below(quality: float, timeout: float = 10.0) -> bool:
+    """Block until the reported line quality is at or under `quality`.
+
+    Applying a preset does not move the line instantly. The level is an
+    Ornstein-Uhlenbeck walk, so it travels to the new set point rather than
+    jumping, and a measurement started too early catches it on the way down.
+    Measured from perfect to train-tunnel, it takes about 0.3 s.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            link = status()["link"]
+            if link["enabled"] and link["quality"] <= quality:
+                return True
+        except requests.RequestException:
+            pass
+        time.sleep(0.2)
+    return False
+
+
 def require_running() -> dict | None:
     """Return the video status, or None after printing why the test cannot run."""
     video = status()["video"]

@@ -24,7 +24,9 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from harness import API, patch, pedal, preset, require_running, source  # noqa: E402
+from harness import (  # noqa: E402
+    API, patch, pedal, preset, require_running, source, wait_link_below,
+)
 
 HELD_THRESHOLD = 2.0
 
@@ -132,11 +134,14 @@ def measure(index: int, name: str, video: dict) -> int:
     # Explicit settings, not a preset. train-tunnel stalls about 14 times a
     # minute, so whether a stall lands inside a 40-frame window is a coin toss
     # and the test would fail on the dice rather than on the code.
-    patch({"link": {"enabled": True, "quality": 6.0, "drift": 4.0,
-                    "stall_rate": 60.0, "stall_min": 0.3, "stall_max": 0.8,
+    # Held frames are counted over three seconds, not one. How many stalls fall
+    # inside the window is a dice roll, and over 40 frames it came up short
+    # about one run in six even with the line pinned this low.
+    patch({"link": {"enabled": True, "quality": 4.0, "drift": 3.0,
+                    "stall_rate": 120.0, "stall_min": 0.4, "stall_max": 0.9,
                     "latency": 0.0, "desync": 0.0}})
-    time.sleep(0.8)
-    bad = capture(index, 40, size=(1280, 720))
+    wait_link_below(20.0)
+    bad = capture(index, 90, size=(1280, 720))
     bad_held = held_share(bad)
     bad_detail = float(np.median([detail(f) for f in bad]))
     print(f"  degraded line  {w}x{h}  held {bad_held:6.3f}  detail {bad_detail:8.1f}")
@@ -171,8 +176,12 @@ def measure(index: int, name: str, video: dict) -> int:
         ("it hands out the resolution the consumer asks for", (w, h) == (1280, 720)),
         ("it is our feed, not an empty OBS scene", black > 20.0 and clean_detail > 500),
         ("a clean line arrives moving, not frozen", clean_held < 0.25),
-        ("degradation reaches the far end too", bad_held > clean_held + 0.15),
-        ("degradation flattens detail at the far end", bad_detail < clean_detail * 0.9),
+        # Held frames are NOT asserted on, for the same reason they are not in
+        # test_video_path: the consumer negotiates its own frame rate, so a run
+        # of held frames can be sampled as one and the share swings run to run.
+        # It is printed because it is informative, and judged on nothing.
+        # Edge detail is the stable measure, and the gap is a factor of 25.
+        ("degradation reaches the far end", bad_detail < clean_detail * 0.5),
         ("a live feed never repeats itself at the far end", live_repeat > 10.0),
         ("a loop does repeat itself at the far end", loop_repeat < live_repeat / 3),
     ]

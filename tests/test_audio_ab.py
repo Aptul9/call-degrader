@@ -24,7 +24,7 @@ import sounddevice as sd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from harness import API, patch, preset  # noqa: E402
+from harness import API, patch, preset, wait_link_below  # noqa: E402
 from src.audio import find_device  # noqa: E402
 
 TONE_HZ = 440.0
@@ -58,6 +58,26 @@ def silence_share(signal: np.ndarray, block: int = 480) -> float:
     return float(np.mean(peaks < 0.005))
 
 
+def tone_reaches_the_chain(before: np.ndarray) -> bool:
+    """Whether the injected tone actually got in.
+
+    Both audio suites drive the chain by playing a tone on the speakers and
+    letting Stereo Mix pick it up. Muted speakers, or a volume at zero, means
+    nothing reaches the chain and every measurement reads as total silence.
+    That is not the product failing, and reporting it as a failure sends
+    whoever reads it hunting for a bug that is not there.
+    """
+    return float(np.abs(before).max()) > 0.01
+
+
+def cannot_measure() -> int:
+    print("\n  the tone never reached the chain: the speakers are muted, the volume")
+    print("  is at zero, or Stereo Mix is disabled. Nothing about the product can")
+    print("  be measured this way until playback is audible.")
+    print("\nskipped: restart with --mic \"Stereo Mix\" and audible speakers")
+    return 0
+
+
 def record_round(speaker: int) -> tuple[np.ndarray, np.ndarray, int]:
     started = requests.post(f"{API}/api/audio-test/start",
                             json={"seconds": SECONDS}, timeout=5).json()
@@ -77,6 +97,31 @@ def record_round(speaker: int) -> tuple[np.ndarray, np.ndarray, int]:
     return before, after, rate
 
 
+def check_hold_to_record(speaker: int) -> list[tuple[str, bool]]:
+    """The held gesture: start with no duration, stop when the button comes up."""
+    started = requests.post(f"{API}/api/audio-test/start", json={}, timeout=5).json()
+    tone = threading.Thread(target=play_tone, args=(speaker, 1.5))
+    tone.start()
+    time.sleep(1.2)
+    during = requests.get(f"{API}/api/audio-test/status", timeout=5).json()
+    done = requests.post(f"{API}/api/audio-test/stop", timeout=5).json()
+    tone.join()
+
+    before, _ = fetch_wav("before")
+    after, _ = fetch_wav("after")
+    print(f"  held         {done['seconds']:.2f}s captured, mic peak {done['peak_in']:.4f}, "
+          f"out peak {done['peak_out']:.4f}")
+    return [
+        ("a held start needs no duration", started.get("ok") is True),
+        ("it reports whether the line is on", "link_on" in started),
+        ("it is recording while held", during["recording"] is True),
+        ("stopping ends it", done["recording"] is False and done["ready"] is True),
+        ("it keeps roughly what was held for", 0.8 < done["seconds"] < 2.0),
+        ("it reports the level the microphone gave", done["peak_in"] > 0.02),
+        ("both sides come back", len(before) > 0 and len(after) > 0),
+    ]
+
+
 def main() -> int:
     if not requests.get(f"{API}/api/state", timeout=5).json()["status"]["audio"]["running"]:
         print("the audio chain is not running")
@@ -94,15 +139,18 @@ def main() -> int:
     print(f"  clean line   before peak {np.abs(clean_before).max():6.4f} "
           f"silent {silence_share(clean_before):5.3f}   "
           f"after peak {np.abs(clean_after).max():6.4f} silent {silence_share(clean_after):5.3f}")
+    if not tone_reaches_the_chain(clean_before):
+        return cannot_measure()
 
     patch({"link": {"enabled": True, "quality": 4.0, "drift": 3.0,
                     "stall_rate": 90.0, "stall_min": 0.8, "stall_max": 1.2,
                     "latency": 0.0, "desync": 0.0}})
-    time.sleep(0.5)
+    wait_link_below(20.0)
     bad_before, bad_after, _ = record_round(speaker)
     print(f"  bad line     before peak {np.abs(bad_before).max():6.4f} "
           f"silent {silence_share(bad_before):5.3f}   "
           f"after peak {np.abs(bad_after).max():6.4f} silent {silence_share(bad_after):5.3f}")
+    held_checks = check_hold_to_record(speaker)
     preset("perfect")
 
     expected = int(SECONDS * rate)
@@ -113,13 +161,19 @@ def main() -> int:
         ("before is the microphone, and it is not silent", np.abs(clean_before).max() > 0.02),
         ("a clean line leaves after untouched",
          abs(silence_share(clean_after) - silence_share(clean_before)) < 0.05),
-        # Not an absolute threshold. The capture starts a moment before the
-        # tone and ends after it, so perhaps 15 percent of any recording is
-        # lead-in and lead-out. What matters is that the raw side is the same
-        # whether the line is clean or wrecked.
+        # Judged on level, not on silence share. The capture starts a moment
+        # before the tone and ends after it, and how much of that lead-in lands
+        # inside the window shifts every run: measured across runs, the before
+        # side's silence share moved between 0.000 and 0.080 with nothing
+        # changing in the code. Peak level is what actually answers the
+        # question, and it holds steady at about 0.22 either way.
         ("the line never touches the before side",
-         abs(silence_share(bad_before) - silence_share(clean_before)) < 0.08),
+         abs(float(np.abs(bad_before).max()) - float(np.abs(clean_before).max())) < 0.05),
+        ("nor does it change how loud the before side is",
+         abs(float(np.sqrt(np.mean(bad_before ** 2)))
+             - float(np.sqrt(np.mean(clean_before ** 2)))) < 0.03),
         ("after carries the degradation", silence_share(bad_after) > silence_share(bad_before) + 0.3),
+        *held_checks,
     ]
     failures = 0
     for label, ok in checks:

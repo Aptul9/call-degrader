@@ -121,12 +121,18 @@ def create_app(controller: Controller) -> FastAPI:
 
     @app.post("/api/audio-test/start")
     def audio_test_start(payload: dict | None = None):
-        seconds = float((payload or {}).get("seconds", 5.0))
-        seconds = max(1.0, min(30.0, seconds))
+        raw = (payload or {}).get("seconds")
+        # No duration means hold-to-record: capture until the button comes up.
+        seconds = None if raw is None else max(1.0, min(30.0, float(raw)))
         if not controller.audio.status()["running"]:
             return JSONResponse(status_code=400, content={
                 "ok": False, "error": "the audio chain is not running"})
-        return {"ok": True, **controller.audio.start_capture(seconds)}
+        started = controller.audio.start_capture(seconds)
+        return {"ok": True, "link_on": controller.settings.get().link.enabled, **started}
+
+    @app.post("/api/audio-test/stop")
+    def audio_test_stop():
+        return {"ok": True, **controller.audio.stop_capture()}
 
     @app.get("/api/audio-test/status")
     def audio_test_status():

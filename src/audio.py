@@ -263,23 +263,48 @@ class AudioPipeline:
 
     # -- A/B recording -------------------------------------------------
 
-    def start_capture(self, seconds: float) -> dict:
-        """Begin capturing both sides of the chain for `seconds`."""
+    # Hard ceiling on a held recording, so a button that never comes back up
+    # cannot grow the buffers without limit.
+    MAX_CAPTURE_SECONDS = 120.0
+
+    def start_capture(self, seconds: float | None = None) -> dict:
+        """Begin capturing both sides. `seconds` None means hold until stopped."""
         cfg = self._store.get().audio
-        blocks = max(1, int(seconds * cfg.samplerate / max(1, cfg.blocksize)))
+        limit = seconds if seconds is not None else self.MAX_CAPTURE_SECONDS
+        blocks = max(1, int(limit * cfg.samplerate / max(1, cfg.blocksize)))
         with self._tap_lock:
             self._tap_raw, self._tap_out = [], []
             self._tap_left = blocks
             self._tap_ready = False
         return {"blocks": blocks, "seconds": round(blocks * cfg.blocksize / cfg.samplerate, 2)}
 
+    def stop_capture(self) -> dict:
+        """End a held recording and keep whatever was captured."""
+        with self._tap_lock:
+            self._tap_left = 0
+            self._tap_ready = len(self._tap_raw) > 0
+            return self._capture_report()
+
     def capture_status(self) -> dict:
         with self._tap_lock:
-            return {
-                "recording": self._tap_left > 0,
-                "ready": self._tap_ready,
-                "captured": len(self._tap_raw),
-            }
+            return self._capture_report()
+
+    def _capture_report(self) -> dict:
+        cfg = self._store.get().audio
+        raw_peak = max((float(np.abs(b).max()) for b in self._tap_raw), default=0.0)
+        out_peak = max((float(np.abs(b).max()) for b in self._tap_out), default=0.0)
+        return {
+            "recording": self._tap_left > 0,
+            "ready": self._tap_ready,
+            "captured": len(self._tap_raw),
+            "seconds": round(len(self._tap_raw) * cfg.blocksize / cfg.samplerate, 2),
+            # What the microphone actually gave. Two recordings of near-silence
+            # sound identical however hard the chain worked on one of them, so
+            # this is the first thing to check when the two players seem the
+            # same.
+            "peak_in": round(raw_peak, 4),
+            "peak_out": round(out_peak, 4),
+        }
 
     def capture_audio(self, side: str) -> tuple[np.ndarray, int] | None:
         """The finished recording. `side` is "before" or "after"."""
