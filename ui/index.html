@@ -89,7 +89,6 @@
 
       <div class="tester">
         <button id="btn-audio-test" class="btn btn-rec">hold to record</button>
-        <button id="btn-audio-replay" class="btn btn-quiet" type="button">re-apply</button>
         <span class="meters">
           <label>mic<span class="meter"><i id="meter-in"></i></span></label>
           <label>out<span class="meter"><i id="meter-out"></i></span></label>
@@ -97,11 +96,25 @@
       </div>
 
       <p class="inert" data-needs-link>the line is off, so both recordings will sound the same</p>
-      <p class="note" id="audio-test-note">Hold and talk. Then change the settings and press re-apply, no need to record again.</p>
+      <p class="note" id="audio-test-note">Hold and talk. Then move anything you like: the call side rebuilds itself from the same take.</p>
 
       <div class="ab" id="audio-test-players" hidden>
-        <label>your microphone<audio id="audio-before" controls preload="none"></audio></label>
-        <label>what the call hears<audio id="audio-after" controls preload="none"></audio></label>
+        <div class="ab-bar">
+          <button id="ab-play" class="btn ab-play" type="button">play</button>
+          <div class="ab-switch" id="ab-switch" role="group" aria-label="which side you are hearing">
+            <button type="button" data-side="before">your microphone</button>
+            <button type="button" data-side="after" class="on">what the call hears</button>
+          </div>
+          <label class="ab-loop"><input type="checkbox" id="ab-loop" checked><span>loop</span></label>
+          <span class="ab-clock" id="ab-clock">0:00</span>
+        </div>
+
+        <div class="ab-stage"><canvas id="ab-wave" class="ab-wave"></canvas></div>
+
+        <p class="ab-hint">
+          Click the wave to move. <kbd>space</kbd> plays, <kbd>a</kbd> flips sides without losing your place.
+          The dim shape behind is your microphone, so anything the line ate shows up as a gap.
+        </p>
       </div>
     </div>
   </div>

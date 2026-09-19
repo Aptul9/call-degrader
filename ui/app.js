@@ -97,6 +97,9 @@ function patch(section, field, value) {
         markAudioPreset(null);
         markInert();
       }
+      // The line drives the audio chain as well, so either section changes
+      // what the far end hears.
+      if (payload.link || payload.audio) abRefreshSoon();
     } catch (err) {
       showError(err.message);
     }
@@ -228,6 +231,8 @@ function buildPresets(names) {
         settings = (await send(`/api/preset/${name}`)).settings;
         markPreset(name);
         render();
+        // A line preset is an audio change too, so the call side follows it.
+        abRefreshSoon();
       } catch (err) {
         showError(err.message);
       }
@@ -248,6 +253,7 @@ function buildAudioPresets(names) {
         settings = (await send(`/api/audio-preset/${encodeURIComponent(name)}`)).settings;
         markAudioPreset(name);
         render();
+        abRefreshSoon();
       } catch (err) {
         showError(err.message);
       }
@@ -418,12 +424,8 @@ function wireAudioTest() {
         return;
       }
 
-      // The query string is what makes the browser refetch rather than replay
-      // the previous recording from its cache.
-      const stamp = Date.now();
-      $('audio-before').src = `/api/audio-test/before.wav?t=${stamp}`;
-      $('audio-after').src = `/api/audio-test/after.wav?t=${stamp}`;
       players.hidden = false;
+      await abLoad({ both: true });
 
       // Two recordings of near-silence sound identical however hard the chain
       // worked on one of them, so a quiet microphone gets said out loud rather
@@ -442,24 +444,336 @@ function wireAudioTest() {
   btn.addEventListener('pointerdown', down);
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
+}
 
-  // The processed side is rendered on demand from the stored raw take, so a
-  // settings change only needs the players pointed at it again. Re-recording
-  // to hear a slider move would make tuning by ear pointless.
-  $('btn-audio-replay').addEventListener('click', async () => {
-    const state = await (await fetch('/api/audio-test/status')).json();
-    if (!state.ready) {
-      note.textContent = 'record something first';
-      note.classList.add('bad');
-      return;
+// -- the A/B player -------------------------------------------------------
+//
+// Two takes, one transport. Both buffers play at once through their own gain,
+// and the switch crossfades between them in 8 ms rather than restarting, so
+// flipping sides lands on the same syllable instead of the top of the take.
+// Hearing the same word twice, a second apart, is not the same test.
+//
+// The processed side is rendered on the server from the stored raw take, so
+// every settings change only needs it fetched again. Nothing is re-recorded.
+
+const AB = {
+  ctx: null,
+  master: null,
+  buffers: { before: null, after: null },
+  gains: { before: null, after: null },
+  sources: null,
+  side: 'after',
+  playing: false,
+  startedAt: 0,   // ctx.currentTime that position 0 of this run corresponds to
+  offset: 0,      // where the playhead sits while paused
+  loop: true,
+  raf: null,
+  pending: null,  // debounce handle for a re-render
+};
+
+function abDuration() {
+  const { before, after } = AB.buffers;
+  if (!before && !after) return 0;
+  if (!before || !after) return (before || after).duration;
+  return Math.min(before.duration, after.duration);
+}
+
+function abPosition() {
+  if (!AB.playing) return AB.offset;
+  const span = abDuration();
+  const at = AB.ctx.currentTime - AB.startedAt;
+  if (!span) return 0;
+  return AB.loop ? at % span : Math.min(at, span);
+}
+
+async function abFetch(side) {
+  // The query string is what makes the browser refetch rather than hand back
+  // the previous render out of its cache.
+  const res = await fetch(`/api/audio-test/${side}.wav?t=${Date.now()}`);
+  if (!res.ok) throw new Error(`${side}.wav: ${res.status}`);
+  return AB.ctx.decodeAudioData(await res.arrayBuffer());
+}
+
+async function abLoad({ both = false } = {}) {
+  if (!AB.ctx) {
+    AB.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    AB.master = AB.ctx.createGain();
+    AB.master.connect(AB.ctx.destination);
+  }
+
+  const wasPlaying = AB.playing;
+  const at = abPosition();
+
+  // Duck before swapping a buffer out from under a running source. A hard cut
+  // on the side you are listening to clicks, and a click reads as broken
+  // software rather than as the setting you just moved.
+  if (wasPlaying) {
+    AB.master.gain.cancelScheduledValues(AB.ctx.currentTime);
+    AB.master.gain.setValueAtTime(AB.master.gain.value, AB.ctx.currentTime);
+    AB.master.gain.linearRampToValueAtTime(0.0001, AB.ctx.currentTime + 0.012);
+  }
+
+  const sides = both ? ['before', 'after'] : ['after'];
+  const loaded = await Promise.all(sides.map(abFetch));
+  sides.forEach((side, i) => { AB.buffers[side] = loaded[i]; });
+
+  abDrawWave();
+  if (wasPlaying) abStart(at);
+  else abPaint();
+}
+
+function abStart(at) {
+  abStopSources();
+  const span = abDuration();
+  if (!span) return;
+
+  // A context built outside a click starts suspended, and everything below
+  // then runs correctly against a clock that is not moving.
+  if (AB.ctx.state === 'suspended') AB.ctx.resume();
+
+  const start = AB.loop ? at % span : Math.min(at, span);
+  AB.sources = {};
+  for (const side of ['before', 'after']) {
+    const buffer = AB.buffers[side];
+    if (!buffer) continue;
+    const src = AB.ctx.createBufferSource();
+    src.buffer = buffer;
+    // Both sides loop over the shared span, so a length difference between
+    // the raw take and the render can never let the two drift apart.
+    src.loop = AB.loop;
+    src.loopStart = 0;
+    src.loopEnd = span;
+
+    const gain = AB.ctx.createGain();
+    gain.gain.value = side === AB.side ? 1 : 0;
+    src.connect(gain).connect(AB.master);
+    src.start(0, start);
+
+    AB.sources[side] = src;
+    AB.gains[side] = gain;
+  }
+
+  if (!AB.loop) {
+    const ender = AB.sources.after || AB.sources.before;
+    if (ender) ender.onended = () => { if (AB.playing) abPause(span); };
+  }
+
+  AB.startedAt = AB.ctx.currentTime - start;
+  AB.playing = true;
+  AB.master.gain.cancelScheduledValues(AB.ctx.currentTime);
+  AB.master.gain.setValueAtTime(Math.max(0.0001, AB.master.gain.value), AB.ctx.currentTime);
+  AB.master.gain.linearRampToValueAtTime(1, AB.ctx.currentTime + 0.012);
+  abPaint();
+  if (!AB.raf) AB.raf = requestAnimationFrame(abTick);
+}
+
+function abStopSources() {
+  if (!AB.sources) return;
+  for (const src of Object.values(AB.sources)) {
+    src.onended = null;
+    try { src.stop(); } catch { /* already finished */ }
+  }
+  AB.sources = null;
+}
+
+function abPause(at) {
+  AB.offset = at === undefined ? abPosition() : at;
+  abStopSources();
+  AB.playing = false;
+  if (AB.raf) { cancelAnimationFrame(AB.raf); AB.raf = null; }
+  abPaint();
+}
+
+function abToggle() {
+  if (AB.playing) abPause();
+  else abStart(AB.offset);
+}
+
+function abSetSide(side) {
+  AB.side = side;
+  if (AB.playing && AB.sources) {
+    const now = AB.ctx.currentTime;
+    for (const key of ['before', 'after']) {
+      const gain = AB.gains[key];
+      if (!gain) continue;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(key === side ? 1 : 0, now + 0.008);
     }
-    const stamp = Date.now();
-    $('audio-before').src = `/api/audio-test/before.wav?t=${stamp}`;
-    $('audio-after').src = `/api/audio-test/after.wav?t=${stamp}`;
-    players.hidden = false;
-    note.classList.remove('bad');
-    note.textContent = 'rebuilt from the same take with the current settings';
+  }
+  for (const btn of document.querySelectorAll('#ab-switch button')) {
+    btn.classList.toggle('on', btn.dataset.side === side);
+  }
+  abDrawWave();
+}
+
+function abTick() {
+  AB.raf = AB.playing ? requestAnimationFrame(abTick) : null;
+  abPaint();
+}
+
+// -- drawing --------------------------------------------------------------
+//
+// Peak envelope, one min/max pair per pixel column. The microphone sits behind
+// as a dim silhouette and the call side is drawn over it, so a dropout reads
+// as the accent colour simply not being there.
+
+function abEnvelope(buffer, columns) {
+  const data = buffer.getChannelData(0);
+  const per = data.length / columns;
+  const out = new Float32Array(columns);
+  for (let x = 0; x < columns; x++) {
+    const from = Math.floor(x * per);
+    const to = Math.min(data.length, Math.floor((x + 1) * per));
+    let peak = 0;
+    for (let i = from; i < to; i++) {
+      const v = Math.abs(data[i]);
+      if (v > peak) peak = v;
+    }
+    out[x] = peak;
+  }
+  return out;
+}
+
+function abDrawWave() {
+  const canvas = $('ab-wave');
+  const box = canvas.getBoundingClientRect();
+  if (!box.width) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(box.width);
+  const h = Math.round(box.height);
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+
+  const g = canvas.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+
+  const mid = h / 2;
+  const style = getComputedStyle(document.documentElement);
+  const back = style.getPropertyValue('--muted').trim() || '#8d95a8';
+  const front = style.getPropertyValue('--accent').trim() || '#6ea8ff';
+
+  g.strokeStyle = style.getPropertyValue('--line').trim() || '#313747';
+  g.beginPath();
+  g.moveTo(0, mid);
+  g.lineTo(w, mid);
+  g.stroke();
+
+  const order = AB.side === 'before'
+    ? [['after', back, 0.25], ['before', front, 1]]
+    : [['before', back, 0.35], ['after', front, 1]];
+
+  for (const [side, colour, alpha] of order) {
+    const buffer = AB.buffers[side];
+    if (!buffer) continue;
+    const env = abEnvelope(buffer, w);
+    g.globalAlpha = alpha;
+    g.fillStyle = colour;
+    g.beginPath();
+    for (let x = 0; x < w; x++) g.lineTo(x, mid - env[x] * (mid - 2));
+    for (let x = w - 1; x >= 0; x--) g.lineTo(x, mid + env[x] * (mid - 2));
+    g.closePath();
+    g.fill();
+  }
+  g.globalAlpha = 1;
+
+  AB.canvasWidth = w;
+  AB.canvasHeight = h;
+  abPaint();
+}
+
+// The playhead moves every frame; redrawing the envelope every frame would
+// burn a core for nothing. It is kept on its own overlay element instead.
+function abPaint() {
+  const span = abDuration();
+  const at = abPosition();
+  const head = $('ab-head');
+  if (head) head.style.left = span ? `${(at / span) * 100}%` : '0%';
+
+  const clock = $('ab-clock');
+  if (clock) clock.textContent = `${abClock(at)} / ${abClock(span)}`;
+
+  const play = $('ab-play');
+  if (play) play.textContent = AB.playing ? 'pause' : 'play';
+}
+
+function abClock(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// -- wiring ---------------------------------------------------------------
+
+function wireAbPlayer() {
+  const canvas = $('ab-wave');
+
+  // The playhead is a DOM element over the canvas rather than a redraw, so
+  // moving it costs a style change instead of a full envelope pass.
+  const head = document.createElement('i');
+  head.id = 'ab-head';
+  head.className = 'ab-head';
+  canvas.parentNode.insertBefore(head, canvas.nextSibling);
+
+  $('ab-play').addEventListener('click', (event) => {
+    abToggle();
+    event.currentTarget.blur();
   });
+
+  $('ab-switch').addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-side]');
+    if (!btn) return;
+    abSetSide(btn.dataset.side);
+    btn.blur();
+  });
+
+  $('ab-loop').addEventListener('change', (event) => {
+    AB.loop = event.target.checked;
+    if (AB.playing) abStart(abPosition());
+  });
+
+  const seek = (event) => {
+    const span = abDuration();
+    if (!span) return;
+    const box = canvas.getBoundingClientRect();
+    const at = ((event.clientX - box.left) / box.width) * span;
+    if (AB.playing) abStart(at);
+    else { AB.offset = Math.max(0, Math.min(span, at)); abPaint(); }
+  };
+  canvas.addEventListener('pointerdown', seek);
+
+  window.addEventListener('keydown', (event) => {
+    if ($('audio-test-players').hidden) return;
+    if (document.querySelector('.panel[data-panel="audio"]').hidden) return;
+    const tag = event.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (event.code === 'Space') { event.preventDefault(); abToggle(); }
+    else if (event.key === 'a' || event.key === 'A') {
+      abSetSide(AB.side === 'after' ? 'before' : 'after');
+    }
+  });
+
+  window.addEventListener('resize', () => abDrawWave());
+}
+
+// Anything that changes what the far end hears re-renders the call side from
+// the take already on the server. The button that used to do this by hand is
+// gone: a comparison you have to remember to ask for is a comparison nobody
+// makes.
+function abRefreshSoon() {
+  if ($('audio-test-players').hidden) return;
+  clearTimeout(AB.pending);
+  AB.pending = setTimeout(async () => {
+    try {
+      await abLoad();
+      const note = $('audio-test-note');
+      note.classList.remove('bad');
+      note.textContent = 'call side rebuilt from the same take with the settings as they are now';
+    } catch (err) {
+      showError(err.message);
+    }
+  }, 180);
 }
 
 // -- live status ----------------------------------------------------------
@@ -525,6 +839,7 @@ function showError(message) {
   wireTabs();
   wirePedal();
   wireAudioTest();
+  wireAbPlayer();
   wireStatus();
   $('hotkey-hint').textContent =
     `Hold ${settings.pedal.record_key} to record, ${settings.pedal.live_key} to go live. `

@@ -94,9 +94,15 @@ Recording is hold-to-record, not press-to-start: the live feed keeps going out w
 
 ### Testing the audio
 
-Hold **hold to record** and talk, release, and two players appear: your microphone, and what the call hears.
+Hold **hold to record** and talk, release, and one player appears with both takes on it: your microphone, and what the call hears.
 
-The processed side is rendered from the stored take when you ask for it, not captured during the recording. So change a preset or a slider, press **re-apply**, and hear the same words under the new settings. Recording again for every adjustment makes tuning by ear impossible.
+The processed side is rendered from the stored take, not captured during the recording, and it is re-rendered whenever anything that reaches the audio chain moves. Click a preset, drag a weight, change the line, and the call side rebuilds itself from the same words. Nothing is recorded twice.
+
+Both takes play at once through their own gain, so the switch between them crossfades in 8 ms instead of restarting. Flipping sides lands on the same syllable, which is the only way to hear what an effect did to a particular consonant. `space` plays, `a` flips, clicking the wave moves the playhead, and leaving loop on lets a phrase repeat while you turn a weight down.
+
+The wave draws both: the microphone as a dim silhouette, the call side over the top. Anything the line ate shows up as the front shape not being there.
+
+The render is seeded, so the same take with the same settings renders identically every time. Unseeded it was not, and two renders of one preset varied more than two presets varied from each other, which made tuning by ear a comparison of random draws.
 
 If the two sound identical, check the `mic peak` the panel reports. Two recordings of near-silence sound the same however hard the chain worked on one of them.
 
