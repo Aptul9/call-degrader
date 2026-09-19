@@ -122,6 +122,32 @@ Every effect also has its own weight, and a weight of zero turns it off.
 
 **Keep colours** is on by default: the chain degrades brightness and puts the original colour back. A starved codec really does wreck chroma, but the result is a picture whose colours crawl, which looks like a broken camera rather than a bad line.
 
+## Building an exe
+
+```
+.venv/Scripts/python.exe -m pip install pyinstaller
+.venv/Scripts/python.exe -m PyInstaller --noconfirm --clean call-degrader.spec
+```
+
+One spec, two targets, because the trade between them is real:
+
+| | size | first HTTP 200 | |
+|---|---|---|---|
+| `dist/call-degrader/` | 164.2 MB, 139 files | 1.06 s | a folder |
+| `dist/call-degrader-portable.exe` | 66.1 MB | 4.11 s | one file |
+
+The single file is a bootloader: it unpacks the whole bundle to a temp directory before running a line of Python, every launch. It does not get faster on the second run, measured at 4.10 s cold and 4.08 s warm.
+
+The console window is kept on purpose. It carries the preflight report, and without a tray icon it is how the app is stopped.
+
+Neither build removes VB-CABLE or the OBS registration. Those are installed separately whatever the exe looks like.
+
+```
+.venv/Scripts/python.exe tests/test_exe.py
+```
+
+checks whatever is in `dist/`, and says so rather than failing when nothing is built yet. A build that succeeds is not a build that works: PyInstaller drops data files and dynamically imported modules without any error, and the usual result is a server that answers on `/` and 404s on the stylesheet, or an audio chain that never opens because the PortAudio DLL stayed behind.
+
 ## Tests
 
 Start the app, then in another terminal:
@@ -137,6 +163,8 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 ## Traps
 
 **Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene instead.
+
+**A onefile bundle is a bootloader, so killing it kills the wrong process.** It unpacks itself and runs the real application as a child. `terminate()` on the launcher leaves that child holding the port, the camera and the virtual camera, and the only symptom is the next run connecting to the previous one: three were left behind that way and the test after them reported a 0.01 s cold start. Kill the tree, `taskkill /F /T /PID`.
 
 **The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll`, and `current` is a scoop junction, so an OBS update keeps working and `scoop uninstall obs-studio` leaves the CLSID registered against a file that is gone: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair was found absent on the development machine after having been set earlier, and Teams went on listing both devices anyway, so current builds do not depend on it. The preflight reports all three on every start, the Teams one quietly as a note.
 

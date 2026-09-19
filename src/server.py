@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import sys
 import wave
 from pathlib import Path
 
@@ -26,7 +27,22 @@ from .app import Controller
 
 log = logging.getLogger(__name__)
 
-UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+def _ui_dir() -> Path:
+    """Where index.html, app.js and style.css actually are.
+
+    Frozen by PyInstaller the source tree does not exist: the bundle is
+    unpacked to a temp directory and `sys._MEIPASS` points at it. Deriving the
+    path from `__file__` happens to work there too, but only by accident of
+    how the modules are laid out, and it breaks the moment the bundle is
+    arranged differently.
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        return Path(bundle) / "ui"
+    return Path(__file__).resolve().parent.parent / "ui"
+
+
+UI_DIR = _ui_dir()
 BOUNDARY = "frame"
 
 
