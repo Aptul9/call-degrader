@@ -8,6 +8,7 @@
 // Always visible. Section, field, label.
 const QUICK_CHECKS = [
   ['link',  'enabled',      'bad line on'],
+  ['video', 'paused',       'pause camera (light goes out)'],
   ['video', 'keep_colours', 'keep colours'],
   ['video', 'mirror',       'mirror camera'],
   ['pedal', 'ghost',        'ghost me under the loop'],

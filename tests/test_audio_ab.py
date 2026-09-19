@@ -134,7 +134,7 @@ def main() -> int:
     speaker, _ = find_device("Speakers", "output")
     print(f"\nplaying {TONE_HZ:.0f} Hz on device {speaker}\n")
 
-    preset("perfect")
+    preset("original")
     clean_before, clean_after, rate = record_round(speaker)
     print(f"  clean line   before peak {np.abs(clean_before).max():6.4f} "
           f"silent {silence_share(clean_before):5.3f}   "
@@ -151,7 +151,7 @@ def main() -> int:
           f"silent {silence_share(bad_before):5.3f}   "
           f"after peak {np.abs(bad_after).max():6.4f} silent {silence_share(bad_after):5.3f}")
     held_checks = check_hold_to_record(speaker)
-    preset("perfect")
+    preset("original")
 
     expected = int(SECONDS * rate)
     print()

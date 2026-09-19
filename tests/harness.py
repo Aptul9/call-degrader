@@ -54,7 +54,7 @@ def source(kind: str):
     try:
         yield
     finally:
-        preset("perfect", settle=0.2)
+        preset("original", settle=0.2)
         if changed:
             patch({"video": {"source": original}})
             time.sleep(1.5)

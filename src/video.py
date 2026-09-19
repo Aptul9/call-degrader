@@ -106,7 +106,9 @@ class VideoPipeline:
 
     def _run(self, stop: threading.Event) -> None:
         cfg = self._store.get().video
-        if cfg.source == "pattern":
+        if cfg.paused:
+            cap, backend = _Paused(cfg), "paused"
+        elif cfg.source == "pattern":
             cap, backend = _TestPattern(cfg), "pattern"
         else:
             cap, backend = _open_camera(cfg)
@@ -224,6 +226,45 @@ class VideoPipeline:
 
 
 # -- helpers ------------------------------------------------------------
+
+
+class _Paused:
+    """What the call sees while the lens is released.
+
+    The point of pausing is the camera light going out, so the physical device
+    is never opened at all. The virtual camera stays up and keeps being fed,
+    because a call already in progress reads a device that stops delivering as
+    a camera that broke rather than as one that was turned off, and some
+    clients then drop it for the rest of the call.
+
+    A dark card, not black: a pure black feed is what a covered lens and a
+    dead driver both look like.
+    """
+
+    def __init__(self, cfg) -> None:
+        self.w, self.h = cfg.width, cfg.height
+        self._frame = np.full((self.h, self.w, 3), 18, dtype=np.uint8)
+        cv2.rectangle(self._frame, (0, 0), (self.w - 1, self.h - 1), (46, 40, 34), 2)
+        text = "camera paused"
+        scale = max(0.8, self.w / 900.0)
+        size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+        cv2.putText(
+            self._frame, text,
+            ((self.w - size[0]) // 2, (self.h + size[1]) // 2),
+            cv2.FONT_HERSHEY_SIMPLEX, scale, (150, 160, 175), 2, cv2.LINE_AA,
+        )
+
+    def isOpened(self) -> bool:  # noqa: N802 - mirrors cv2.VideoCapture
+        return True
+
+    def set(self, *_args) -> bool:
+        return True
+
+    def release(self) -> None:
+        return None
+
+    def read(self):  # noqa: D401 - mirrors cv2.VideoCapture
+        return True, self._frame.copy()
 
 
 class _TestPattern:

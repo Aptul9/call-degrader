@@ -170,7 +170,7 @@ def test_every_audio_preset_actually_changes_the_sound():
             out = deg.apply(tone, snap, cfg.audio)
             worst = max(worst, float(np.mean(np.abs(out - tone))))
 
-        if name == "clean voice":
+        if name == "original":
             assert worst < 1e-6, "the clean preset must leave the sound alone"
         else:
             assert worst > 0.01, f"audio preset {name!r} changes nothing, at severity {snap.severity:.2f}"
@@ -180,7 +180,42 @@ def test_the_only_uncapped_preset_is_the_clean_one():
     from src.config import PRESETS
 
     uncapped = [n for n, p in PRESETS.items() if p["link"]["ceiling"] >= 100.0]
-    assert uncapped == ["perfect"], f"these presets can still reach perfect: {uncapped}"
+    assert uncapped == ["original"], f"these presets can still reach perfect: {uncapped}"
+
+
+def test_pausing_feeds_a_card_instead_of_opening_a_camera():
+    """Pause has to keep sending, not stop sending.
+
+    The camera light going out is the point, so the physical device is never
+    opened. But a client reading a device that goes quiet treats it as a
+    camera that broke, and some drop it for the rest of the call, so the
+    virtual camera keeps being fed a card.
+    """
+    from src.config import VideoSettings
+    from src.video import _Paused
+
+    assert VideoSettings().paused is False, "pause must be off until asked for"
+
+    cfg = VideoSettings(width=320, height=180, paused=True)
+    source = _Paused(cfg)
+    ok, frame = source.read()
+    assert ok and frame.shape == (180, 320, 3)
+    assert frame.max() > 40, "a pure black card is indistinguishable from a dead driver"
+    assert frame.min() < 40, "the card has to read as deliberate, not as a grey fault"
+
+    # A caller must not get a handle on the frame the source keeps, or the
+    # degrader writing in place would corrode the card over time.
+    frame[:] = 0
+    assert source.read()[1].max() > 40
+
+
+def test_pausing_restarts_the_video_chain():
+    from src.app import _differs
+    from src.config import VideoSettings
+
+    watched = ("source", "camera", "backend", "paused", "width", "height", "fps")
+    assert _differs(VideoSettings(), VideoSettings(paused=True), watched), \
+        "pause changes what the chain opens, so it has to be read at start"
 
 
 def test_link_is_reproducible_for_a_given_seed():

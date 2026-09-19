@@ -103,7 +103,7 @@ def main() -> int:
 
 def measure() -> int:
     print()
-    preset("perfect")
+    preset("original")
     clean = grab(40)
     clean_held = held_share(clean)
     clean_detail = float(np.median([detail(f) for f in clean]))
@@ -124,7 +124,7 @@ def measure() -> int:
     print(f"  degraded line  frames {len(bad):>3}   held {bad_held:6.3f}   "
           f"detail {bad_detail:8.1f}")
 
-    preset("perfect")
+    preset("original")
 
     # -- the pedal, on the live chain ---------------------------------
     pedal("clear")

@@ -94,7 +94,8 @@ class Controller:
         if before.video.enabled != after.video.enabled:
             self.video.start() if after.video.enabled else self.video.stop()
         elif after.video.enabled and _differs(
-            before.video, after.video, ("source", "camera", "backend", "width", "height", "fps")
+            before.video, after.video,
+            ("source", "camera", "backend", "paused", "width", "height", "fps"),
         ):
             self.video.stop()
             self.video.start()

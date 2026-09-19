@@ -122,7 +122,7 @@ def measure(index: int, name: str, video: dict) -> int:
     print(f"\napp is sending to: {video['virtual_camera']}")
     print(f"reading back from: [{index}] {name}\n")
 
-    preset("perfect")
+    preset("original")
     clean = capture(index, 40, size=(1280, 720))
     clean_held = held_share(clean)
     clean_detail = float(np.median([detail(f) for f in clean]))
@@ -146,7 +146,7 @@ def measure(index: int, name: str, video: dict) -> int:
     bad_detail = float(np.median([detail(f) for f in bad]))
     print(f"  degraded line  {w}x{h}  held {bad_held:6.3f}  detail {bad_detail:8.1f}")
 
-    preset("perfect")
+    preset("original")
 
     # -- the pedal, judged from the consumer side ---------------------
     # The window has to cover a whole loop cycle, and a bounce cycle is twice

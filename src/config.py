@@ -53,6 +53,12 @@ class VideoSettings:
     # this to "dshow" when you choose one. "auto" keeps the old behaviour of
     # trying each backend in turn.
     backend: str = "auto"
+    # Release the physical camera and feed the call a dark card instead. The
+    # camera light goes out, which is the whole point, and the virtual camera
+    # stays up so a call in progress does not see its device disappear.
+    # Independent of `source`: pausing and then unpausing comes back to
+    # whatever source was selected.
+    paused: bool = False
     width: int = 1280
     height: int = 720
     fps: int = 30
@@ -136,10 +142,10 @@ class Settings:
 
 # Every preset sets every field it cares about, ceiling and floor included.
 # A preset that leaves one out inherits whatever the previous preset left
-# behind, so switching from a capped line to `perfect` would silently keep the
+# behind, so switching from a capped line to `original` would silently keep the
 # cap and the line would never look clean again.
 PRESETS: dict[str, dict] = {
-    "perfect": {
+    "original": {
         "link": {
             "enabled": False,
             "quality": 100.0,
@@ -247,7 +253,7 @@ PRESETS: dict[str, dict] = {
 # line off, or sitting at perfect, every one of them multiplies zero. A preset
 # that set weights alone would do nothing audible and look broken.
 AUDIO_PRESETS: dict[str, dict] = {
-    "clean voice": {
+    "original": {
         "link": {"enabled": False},
         "audio": {
             "dropout_weight": 1.0, "stutter_weight": 1.0, "bitcrush_weight": 1.0,
