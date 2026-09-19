@@ -78,6 +78,28 @@ def wait_ready(timeout: float = 20.0) -> bool:
     return False
 
 
+def wait_audio_ready(timeout: float = 20.0) -> bool:
+    """Block until the audio chain is up and its underrun count has settled.
+
+    The output stream starts before the input has produced anything, so the
+    first few blocks always underrun. A suite that starts measuring during that
+    window reads a chain that is not yet steady.
+    """
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        try:
+            audio = status()["audio"]
+            if audio["running"]:
+                if last is not None and audio["underruns"] == last:
+                    return True
+                last = audio["underruns"]
+        except requests.RequestException:
+            pass
+        time.sleep(0.5)
+    return False
+
+
 def require_running() -> dict | None:
     """Return the video status, or None after printing why the test cannot run."""
     video = status()["video"]

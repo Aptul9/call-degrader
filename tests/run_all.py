@@ -24,10 +24,17 @@ SUITES = ["test_core", "test_video_path", "test_virtual_camera",
           "test_cable_path", "test_audio_ab"]
 
 
-def ready() -> bool:
-    from harness import wait_ready
+AUDIO_SUITES = {"test_cable_path", "test_audio_ab"}
 
-    return wait_ready()
+
+def ready(name: str) -> bool:
+    from harness import wait_audio_ready, wait_ready
+
+    if not wait_ready():
+        return False
+    # The audio suites measure a live stream, so they also wait for the
+    # underrun count to stop moving, which is how the chain says it has settled.
+    return wait_audio_ready() if name in AUDIO_SUITES else True
 
 
 def main() -> int:
@@ -36,8 +43,8 @@ def main() -> int:
 
     for name in SUITES:
         print(f"\n{'=' * 60}\n{name}\n{'=' * 60}")
-        if name != "test_core" and not ready():
-            print("video chain never came up, skipping")
+        if name != "test_core" and not ready(name):
+            print("the chain never settled, skipping")
             failed.append(name)
             continue
         result = subprocess.run(

@@ -84,6 +84,13 @@ def create_app(controller: Controller) -> FastAPI:
         except KeyError:
             raise HTTPException(status_code=404, detail=f"no preset {name!r}")
 
+    @app.post("/api/audio-preset/{name}")
+    def audio_preset(name: str):
+        try:
+            return {"settings": controller.apply_audio_preset(name).to_dict()}
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"no audio preset {name!r}")
+
     # -- pedal ---------------------------------------------------------
 
     @app.post("/api/pedal/{action}")

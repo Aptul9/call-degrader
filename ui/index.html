@@ -19,100 +19,109 @@
   </div>
 </header>
 
+<nav class="tabs" id="tabs">
+  <button class="tab on" data-tab="video">video</button>
+  <button class="tab" data-tab="audio">audio</button>
+</nav>
+
 <main>
 
- <section class="stage">
+  <!-- VIDEO -->
+  <section class="panel" data-panel="video">
 
-  <div class="preview">
-    <img id="preview" src="/preview.mjpg" alt="camera preview">
-    <div id="stall-flash" class="stall-flash"></div>
-  </div>
-
-  <div class="pedal">
-    <button id="btn-record" class="btn btn-rec">hold to record</button>
-    <button id="btn-live" class="btn">back to live</button>
-    <button id="btn-clear" class="btn btn-quiet">clear loop</button>
-    <span class="meters">
-      <label>mic<span class="meter"><i id="meter-in"></i></span></label>
-      <label>out<span class="meter"><i id="meter-out"></i></span></label>
-    </span>
-  </div>
-
-  <p class="hint" id="hotkey-hint"></p>
-
- </section>
-
- <section class="side">
-
-  <div class="quick">
-    <div class="presets" id="presets"></div>
-
-    <div class="picks">
-      <label class="pick">
-        <span>camera</span>
-        <select id="camera-pick"></select>
-      </label>
-      <button id="btn-rescan" class="btn btn-quiet btn-small" type="button">rescan</button>
-      <label class="pick">
-        <span>loop style</span>
-        <select id="loop-pick"></select>
-      </label>
+    <div class="preview">
+      <img id="preview" src="/preview.mjpg" alt="camera preview">
+      <div id="stall-flash" class="stall-flash"></div>
     </div>
 
-    <div class="checks" id="quick-checks"></div>
-  </div>
-
-  <details class="fold" data-fold="audiotest" open>
-    <summary>test the audio<span class="sub">hear what the call hears</span></summary>
-    <div class="row">
-      <button id="btn-audio-test" class="btn">record</button>
-      <select id="audio-test-secs" class="secs">
-        <option value="3">3 s</option>
-        <option value="5" selected>5 s</option>
-        <option value="10">10 s</option>
-      </select>
-      <span id="audio-test-note" class="note"></span>
+    <div class="pedal">
+      <button id="btn-record" class="btn btn-rec">hold to record</button>
+      <button id="btn-live" class="btn">back to live</button>
+      <button id="btn-clear" class="btn btn-quiet">clear loop</button>
     </div>
-    <div class="ab" id="audio-test-players" hidden>
-      <label>your microphone<audio id="audio-before" controls preload="none"></audio></label>
-      <label>what the call hears<audio id="audio-after" controls preload="none"></audio></label>
+
+    <div class="quick">
+      <div class="presets" id="presets"></div>
+
+      <div class="picks">
+        <label class="pick">
+          <span>camera</span>
+          <select id="camera-pick"></select>
+        </label>
+        <button id="btn-rescan" class="btn btn-quiet btn-small" type="button">rescan</button>
+        <label class="pick">
+          <span>loop style</span>
+          <select id="loop-pick"></select>
+        </label>
+      </div>
+
+      <div class="checks" id="quick-checks"></div>
+      <p class="hint" id="hotkey-hint"></p>
     </div>
-  </details>
 
-  <!-- set once, then folded away -->
+    <details class="fold" data-fold="video">
+      <summary>video effects<span class="sub">how hard each one reacts</span></summary>
+      <p class="inert" data-needs-link>the line is off, so these do nothing yet</p>
+      <div class="grid" id="group-video"></div>
+    </details>
 
+    <details class="fold" data-fold="pedal">
+      <summary>pedal timing<span class="sub">recording length, crossfade, ghost opacity</span></summary>
+      <div class="grid" id="group-pedal"></div>
+    </details>
+
+  </section>
+
+  <!-- AUDIO -->
+  <section class="panel" data-panel="audio" hidden>
+
+    <div class="quick">
+      <div class="presets" id="audio-presets"></div>
+
+      <div class="row tester">
+        <button id="btn-audio-test" class="btn">record</button>
+        <select id="audio-test-secs" class="secs">
+          <option value="3">3 s</option>
+          <option value="5" selected>5 s</option>
+          <option value="10">10 s</option>
+        </select>
+        <span class="meters">
+          <label>mic<span class="meter"><i id="meter-in"></i></span></label>
+          <label>out<span class="meter"><i id="meter-out"></i></span></label>
+        </span>
+      </div>
+      <p class="note" id="audio-test-note">Record a few seconds, then compare the two.</p>
+
+      <div class="ab" id="audio-test-players" hidden>
+        <label>your microphone<audio id="audio-before" controls preload="none"></audio></label>
+        <label>what the call hears<audio id="audio-after" controls preload="none"></audio></label>
+      </div>
+    </div>
+
+    <details class="fold" data-fold="audio">
+      <summary>audio effects<span class="sub">how hard each one reacts</span></summary>
+      <p class="inert" data-needs-link>the line is off, so these do nothing yet</p>
+      <div class="grid" id="group-audio"></div>
+    </details>
+
+    <details class="fold" data-fold="devices">
+      <summary>audio routing<span class="sub">point the system microphone at the cable</span></summary>
+      <div class="row">
+        <button id="btn-route" class="btn btn-quiet">point system mic at CABLE Output</button>
+        <span id="route-result" class="note"></span>
+      </div>
+      <div class="grid" id="group-devices"></div>
+    </details>
+
+  </section>
+
+  <!-- shared: the line drives both chains, so it sits under both tabs -->
   <details class="fold" data-fold="line">
-    <summary>line detail<span class="sub">quality band, stalls, delay</span></summary>
+    <summary>the line<span class="sub">drives video and audio together</span></summary>
     <div class="grid" id="group-link"></div>
   </details>
 
-  <details class="fold" data-fold="video">
-    <summary>video effects<span class="sub">how hard each one reacts</span></summary>
-    <div class="grid" id="group-video"></div>
-  </details>
-
-  <details class="fold" data-fold="audio">
-    <summary>audio effects<span class="sub">how hard each one reacts</span></summary>
-    <div class="grid" id="group-audio"></div>
-  </details>
-
-  <details class="fold" data-fold="pedal">
-    <summary>pedal timing<span class="sub">recording length, crossfade, ghost opacity</span></summary>
-    <div class="grid" id="group-pedal"></div>
-  </details>
-
-  <details class="fold" data-fold="devices">
-    <summary>audio routing<span class="sub">point the system microphone at the cable</span></summary>
-    <div class="row">
-      <button id="btn-route" class="btn btn-quiet">point system mic at CABLE Output</button>
-      <span id="route-result" class="note"></span>
-    </div>
-    <div class="grid" id="group-devices"></div>
-  </details>
-
   <p class="note" id="errors"></p>
-
- </section>
 
 </main>
 

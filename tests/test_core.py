@@ -134,6 +134,40 @@ def test_every_preset_sets_ceiling_and_floor():
         assert link["floor"] <= link["ceiling"], f"preset {name!r} has floor above ceiling"
 
 
+def test_every_audio_preset_actually_changes_the_sound():
+    """The bug this exists to stop: weights that quietly multiply zero.
+
+    Every audio effect scales a reaction to a falling line. With the line off,
+    or sitting at perfect, all of them multiply zero and the sliders move with
+    no effect whatsoever. An audio preset therefore has to carry a line setting
+    too, or clicking it does nothing audible and looks broken.
+    """
+    from src.config import AUDIO_PRESETS
+
+    from src.state import LinkSimulator
+
+    tone = (np.sin(np.linspace(0, 80, 480)) * 0.5).astype(np.float32)
+
+    for name in AUDIO_PRESETS:
+        store = SettingsStore()
+        store.apply_audio_preset(name)
+        cfg = store.get()
+
+        sim = LinkSimulator(store)
+        snap = sim._advance(cfg.link, 0.01, 1.0)
+
+        deg = AudioDegrader()
+        worst = 0.0
+        for _ in range(60):
+            out = deg.apply(tone, snap, cfg.audio)
+            worst = max(worst, float(np.mean(np.abs(out - tone))))
+
+        if name == "clean voice":
+            assert worst < 1e-6, "the clean preset must leave the sound alone"
+        else:
+            assert worst > 0.01, f"audio preset {name!r} changes nothing, at severity {snap.severity:.2f}"
+
+
 def test_the_only_uncapped_preset_is_the_clean_one():
     from src.config import PRESETS
 

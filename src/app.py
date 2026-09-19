@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 
 from .audio import AudioPipeline, list_devices, set_default_microphone
-from .config import PRESETS, Settings, SettingsStore
+from .config import AUDIO_PRESETS, PRESETS, Settings, SettingsStore
 from .hotkeys import Hotkeys
 from .state import LinkSimulator
 from .video import VideoPipeline, list_cameras
@@ -76,6 +76,12 @@ class Controller:
         self._reconcile(before, after)
         return after
 
+    def apply_audio_preset(self, name: str) -> Settings:
+        before = self.settings.get()
+        after = self.settings.apply_audio_preset(name)
+        self._reconcile(before, after)
+        return after
+
     def _reconcile(self, before: Settings, after: Settings) -> None:
         """Restart whichever chain had a setting changed that it reads once."""
         if before.video.enabled != after.video.enabled:
@@ -115,6 +121,7 @@ class Controller:
             "settings": self.settings.get().to_dict(),
             "status": self.status(),
             "presets": list(PRESETS),
+            "audio_presets": list(AUDIO_PRESETS),
         }
 
     # -- passthroughs --------------------------------------------------

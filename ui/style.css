@@ -56,26 +56,39 @@ h1 {
 .pill.warn { color: var(--loop); border-color: #6a5320; }
 .pill.bad  { color: var(--rec);  border-color: #6a2b2b; }
 
-/* Two columns, but both tracks start at minmax(0, ...) so neither can push the
-   other off the side of the window. The earlier version used fixed minimums and
-   a 980px breakpoint, which dropped the whole right-hand column below the fold
-   on an ordinary window, with nothing on screen to say it was down there. The
-   folds keep that column short, which is what makes two columns work here. */
+/* One column under the tabs. The controls that belong to what is on screen sit
+   directly under it, which is the whole point of the tabs: a second column only
+   ever put half of them somewhere the eye does not go. */
 main {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
-  max-width: 1500px;
+  max-width: 940px;
   margin: 0 auto;
   padding: 16px 20px 60px;
 }
 
-@media (max-width: 720px) {
-  main { grid-template-columns: minmax(0, 1fr); }
+.tabs {
+  display: flex;
+  gap: 2px;
+  max-width: 940px;
+  margin: 16px auto 0;
+  padding: 0 20px;
 }
 
-.side { min-width: 0; }
+.tab {
+  padding: 9px 22px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 9px 9px 0 0;
+  background: var(--bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: .04em;
+  cursor: pointer;
+}
+.tab:hover { color: var(--text); }
+.tab.on { background: var(--panel); color: var(--text); border-color: var(--line); }
+
+main > .panel { margin-bottom: 10px; }
 
 /* -- stage ------------------------------------------------------------ */
 
@@ -140,7 +153,7 @@ main {
 /* -- the part that stays open ------------------------------------------ */
 
 .quick {
-  margin-top: 0;
+  margin-top: 12px;
   padding: 14px 16px 16px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -245,9 +258,26 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   padding: 8px 10px;
 }
 
-.ab { display: grid; gap: 10px; padding: 4px 16px 16px; }
+.ab { display: grid; gap: 10px; margin-top: 14px; }
 .ab label { display: grid; gap: 5px; font-size: 12px; color: var(--muted); }
 .ab audio { width: 100%; height: 34px; filter: invert(.92) hue-rotate(180deg); }
+
+/* Shown when the line is off. Every effect weight multiplies a reaction to a
+   falling line, so with the line off they all multiply zero and moving them
+   does nothing at all. Saying so beats letting someone tune dead controls. */
+.inert {
+  margin: 0 16px 10px;
+  padding: 8px 11px;
+  border-radius: 7px;
+  border: 1px solid #6a5320;
+  background: #2a2318;
+  color: var(--loop);
+  font-size: 12px;
+}
+.inert[hidden] { display: none; }
+
+.tester { padding: 0; margin-top: 14px; }
+.tester .meters { margin-left: auto; }
 
 .note { color: var(--muted); font-size: 12px; margin-top: 14px; }
 .note.bad { color: var(--rec); }

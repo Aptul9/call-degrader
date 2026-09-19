@@ -242,6 +242,61 @@ PRESETS: dict[str, dict] = {
 }
 
 
+# Audio presets carry a line setting as well as the weights, and that is on
+# purpose. The weights only ever scale a reaction to a falling line: with the
+# line off, or sitting at perfect, every one of them multiplies zero. A preset
+# that set weights alone would do nothing audible and look broken.
+AUDIO_PRESETS: dict[str, dict] = {
+    "clean voice": {
+        "link": {"enabled": False},
+        "audio": {
+            "dropout_weight": 1.0, "stutter_weight": 1.0, "bitcrush_weight": 1.0,
+            "warble_weight": 1.0, "metallic_weight": 0.8,
+        },
+    },
+    "choppy": {
+        "link": {
+            "enabled": True, "quality": 55.0, "ceiling": 72.0, "floor": 30.0,
+            "drift": 10.0, "stall_rate": 8.0, "stall_min": 0.2, "stall_max": 0.8,
+        },
+        "audio": {
+            "dropout_weight": 1.3, "stutter_weight": 1.5, "bitcrush_weight": 0.4,
+            "warble_weight": 0.3, "metallic_weight": 0.2,
+        },
+    },
+    "robot": {
+        "link": {
+            "enabled": True, "quality": 35.0, "ceiling": 48.0, "floor": 18.0,
+            "drift": 8.0, "stall_rate": 4.0, "stall_min": 0.2, "stall_max": 0.6,
+        },
+        "audio": {
+            "dropout_weight": 0.8, "stutter_weight": 2.0, "bitcrush_weight": 1.6,
+            "warble_weight": 0.5, "metallic_weight": 1.4,
+        },
+    },
+    "underwater": {
+        "link": {
+            "enabled": True, "quality": 30.0, "ceiling": 44.0, "floor": 14.0,
+            "drift": 12.0, "stall_rate": 3.0, "stall_min": 0.3, "stall_max": 1.0,
+        },
+        "audio": {
+            "dropout_weight": 0.5, "stutter_weight": 0.6, "bitcrush_weight": 2.0,
+            "warble_weight": 2.0, "metallic_weight": 1.6,
+        },
+    },
+    "barely there": {
+        "link": {
+            "enabled": True, "quality": 8.0, "ceiling": 22.0, "floor": 0.0,
+            "drift": 8.0, "stall_rate": 20.0, "stall_min": 1.0, "stall_max": 4.0,
+        },
+        "audio": {
+            "dropout_weight": 2.0, "stutter_weight": 1.8, "bitcrush_weight": 1.5,
+            "warble_weight": 1.2, "metallic_weight": 1.0,
+        },
+    },
+}
+
+
 _SECTIONS = {
     "link": LinkSettings,
     "video": VideoSettings,
@@ -290,6 +345,12 @@ class SettingsStore:
 
     def apply_preset(self, name: str) -> Settings:
         preset = PRESETS.get(name)
+        if preset is None:
+            raise KeyError(name)
+        return self.patch(preset)
+
+    def apply_audio_preset(self, name: str) -> Settings:
+        preset = AUDIO_PRESETS.get(name)
         if preset is None:
             raise KeyError(name)
         return self.patch(preset)

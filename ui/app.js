@@ -64,6 +64,7 @@ const $ = (id) => document.getElementById(id);
 let settings = null;
 let pending = null;
 let activePreset = null;
+let activeAudioPreset = null;
 
 // -- talking to the server ---------------------------------------------
 
@@ -91,7 +92,11 @@ function patch(section, field, value) {
     patch.queued = false;
     try {
       settings = (await send('/api/settings', payload)).settings;
-      if (payload.link) markPreset(null);  // a hand edit is no longer that preset
+      if (payload.link) {
+        markPreset(null);  // a hand edit is no longer that preset
+        markAudioPreset(null);
+        markInert();
+      }
     } catch (err) {
       showError(err.message);
     }
@@ -225,6 +230,41 @@ function buildPresets(names) {
   }
 }
 
+function buildAudioPresets(names) {
+  const host = $('audio-presets');
+  host.innerHTML = '';
+  for (const name of names) {
+    const btn = document.createElement('button');
+    btn.textContent = name;
+    btn.dataset.audioPreset = name;
+    btn.addEventListener('click', async () => {
+      try {
+        settings = (await send(`/api/audio-preset/${encodeURIComponent(name)}`)).settings;
+        markAudioPreset(name);
+        render();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+    host.appendChild(btn);
+  }
+}
+
+function markAudioPreset(name) {
+  activeAudioPreset = name;
+  for (const btn of document.querySelectorAll('#audio-presets button')) {
+    btn.classList.toggle('on', btn.dataset.audioPreset === name);
+  }
+}
+
+// Every effect weight scales a reaction to a falling line. With the line off
+// they all multiply zero, so the sliders move and nothing happens. That is
+// exactly the trap this banner exists to close.
+function markInert() {
+  const off = !settings.link.enabled;
+  for (const note of document.querySelectorAll('[data-needs-link]')) note.hidden = !off;
+}
+
 function markPreset(name) {
   activePreset = name;
   for (const btn of document.querySelectorAll('#presets button')) {
@@ -238,25 +278,38 @@ function render() {
   buildGroup('devices');
   buildCameras();
   markPreset(activePreset);
+  markAudioPreset(activeAudioPreset);
+  markInert();
 }
 
 // -- folds remember whether they were open -------------------------------
 
-function wireFolds() {
-  for (const fold of document.querySelectorAll('.fold')) {
-    const key = `fold:${fold.dataset.fold}`;
-    try {
-      if (localStorage.getItem(key) === 'open') fold.open = true;
-    } catch (err) {
-      // Private windows and blocked site data throw on access. The folds then
-      // start closed, which is the sensible default anyway.
+// Tabs. Which one is showing is remembered; the folds are not, because a fold
+// left open came back open on the next load and looked like it had never
+// collapsed in the first place.
+function wireTabs() {
+  const show = (name) => {
+    for (const tab of document.querySelectorAll('.tab')) {
+      tab.classList.toggle('on', tab.dataset.tab === name);
     }
-    fold.addEventListener('toggle', () => {
-      try {
-        localStorage.setItem(key, fold.open ? 'open' : 'shut');
-      } catch (err) { /* nothing to do, and nothing worth saying */ }
-    });
+    for (const panel of document.querySelectorAll('.panel')) {
+      panel.hidden = panel.dataset.panel !== name;
+    }
+    try {
+      localStorage.setItem('tab', name);
+    } catch (err) { /* private window, not worth reporting */ }
+  };
+
+  for (const tab of document.querySelectorAll('.tab')) {
+    tab.addEventListener('click', () => show(tab.dataset.tab));
   }
+
+  let start = 'video';
+  try {
+    const saved = localStorage.getItem('tab');
+    if (saved && document.querySelector(`.panel[data-panel="${saved}"]`)) start = saved;
+  } catch (err) { /* private window */ }
+  show(start);
 }
 
 // -- pedal ---------------------------------------------------------------
@@ -414,8 +467,9 @@ function showError(message) {
   const state = await (await fetch('/api/state')).json();
   settings = state.settings;
   buildPresets(state.presets);
+  buildAudioPresets(state.audio_presets || []);
   render();
-  wireFolds();
+  wireTabs();
   wirePedal();
   wireAudioTest();
   wireStatus();
