@@ -12,9 +12,29 @@ The pieces exist separately. `haxybaxy/video-pedal` does the loop and nothing el
 
 - Windows, Python 3.11 or newer. Tested on Windows 11 and Python 3.14.6.
 - [VB-CABLE](https://vb-audio.com/Cable/) for the virtual microphone.
-- OBS Studio installed for the virtual camera. It is never opened; the installer registers the driver that `pyvirtualcam` writes into. [Unity Capture](https://github.com/schellingb/UnityCapture) works as a smaller alternative, around 3 MB against 150 MB.
+- OBS Studio for the virtual camera. It is never opened; what is needed is the DirectShow filter its package registers, which `pyvirtualcam` writes into.
 
 Without the camera driver the tool still runs and the audio chain still works. The video shows in the preview and goes nowhere else, and the status bar says so.
+
+### Installing the camera driver
+
+```
+scoop install obs-studio
+```
+
+Then, from an elevated prompt, once:
+
+```
+%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\virtualcam-install.bat
+```
+
+That registers CLSID `{A3FCE0F5-3493-419F-958A-ABA1250EC20B}` under `HKLM\SOFTWARE\Classes\CLSID`, in both the 32-bit and the 64-bit view. `virtualcam-uninstall.bat` in the same folder reverses it. The official OBS installer does the same thing in one step; the scoop route keeps OBS itself in the user directory.
+
+### Other backends
+
+`pyvirtualcam` supports OBS and [Unity Capture](https://github.com/schellingb/UnityCapture) on Windows, OBS on macOS (OBS 30 or later on macOS 13 and up), and v4l2loopback on Linux. Unity Capture has not been pushed since May 2023 and carries 32 open issues.
+
+Two maintained alternatives exist, neither of which `pyvirtualcam` drives, so either would mean writing the frame feed here: [softcam](https://github.com/tshino/softcam), MIT, Windows only, a DLL with `scCreateCamera` and `scSendFrame` reachable from `ctypes`, and [akvirtualcamera](https://github.com/webcamoid/akvirtualcamera), GPLv3, Windows and macOS, fed by piping raw frames to `AkVCamManager` on stdin.
 
 ## Setup
 
@@ -73,19 +93,38 @@ Presets: `perfect`, `slightly-off`, `bad-wifi`, `train-tunnel`, `about-to-drop`.
 
 ## Tests
 
+Start the app in one terminal, then in another:
+
 ```bash
-.venv/Scripts/python.exe tests/test_core.py          # no hardware needed
-.venv/Scripts/python.exe tests/test_video_path.py    # against a running app
-.venv/Scripts/python.exe tests/test_cable_path.py    # against a running app started with --mic "Stereo Mix"
+.venv/Scripts/python.exe tests/run_all.py
 ```
 
-`test_core.py` covers the link, the effects and the looper with no camera and no audio device. The other two measure the running chains: the video one pulls frames off the preview stream and measures held frames and edge detail, the cable one plays a tone on the speakers and records it back off `CABLE Output`, which is the device the call application would be using.
+Or one at a time:
 
-The video test switches the source to the generated pattern for its measurements. A covered lens or a dark room produces an almost constant frame, and against that a dropped frame and a delivered one are indistinguishable.
+```bash
+.venv/Scripts/python.exe tests/test_core.py            # no hardware needed
+.venv/Scripts/python.exe tests/test_video_path.py      # the chain, via the preview stream
+.venv/Scripts/python.exe tests/test_virtual_camera.py  # reads the virtual camera back
+.venv/Scripts/python.exe tests/test_cable_path.py      # needs the app on --mic "Stereo Mix"
+```
+
+`test_core.py` covers the link, the effects and the looper with no camera and no audio device.
+
+`test_virtual_camera.py` is the one that proves the tool reaches another application: it opens the virtual camera from a separate process the way a call client would, and checks the resolution, that the picture is the feed rather than an empty OBS scene, that degradation arrives, and that a loop repeats at the far end while a live feed does not.
+
+`test_cable_path.py` plays a tone on the speakers, lets the app pick it up through Stereo Mix, and records it back off `CABLE Output`, which is the device the call application would be using as its microphone.
+
+Each test that drives the app sets up what it needs and puts back what it found, so they can run in any order. The integration tests switch the source to the generated pattern for their measurements; a covered lens or a dark room produces an almost constant frame, and against that a dropped frame and a delivered one are indistinguishable.
 
 ## Traps
 
 **Keep OBS closed.** If OBS is open with its own virtual camera started, it owns the device and pushes its scene out instead.
+
+**The consumer negotiates the capture format, not the sender.** OpenCV's DirectShow capture asks for 640x480 unless told otherwise, so reading the virtual camera back without setting `CAP_PROP_FRAME_WIDTH` and `CAP_PROP_FRAME_HEIGHT` returns downscaled frames and looks as though the tool is sending the wrong size.
+
+**Dropped frames cannot be counted off the preview stream.** It skips on purpose, sleeping 1/30 s between parts while the pipeline also runs at 30 fps, so a run of held frames can be sampled as a single one. The measured share swings between 0.03 and 0.33 for identical settings. Count them at a real capture device instead.
+
+**Randomised presets make flaky assertions.** `train-tunnel` stalls about 14 times a minute, so over a two-second window whether a stall lands at all is a coin toss. Tests that need a stall set the link explicitly rather than reaching for a preset.
 
 **VB-CABLE device variants are not interchangeable.** Measured on this machine by writing a 440 Hz tone into each variant and reading it back: `CABLE Input` on MME carries, `CABLE Output` on MME returns one 16-bit LSB of dither and nothing else, `CABLE Output` on WASAPI refuses to open with `PaErrorCode -9999`, and several other pairings segfault PortAudio outright. The channel count is not the discriminator: the working playback device is the 16-channel MME one. The order used is in `src/audio.py`.
 

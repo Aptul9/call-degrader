@@ -18,8 +18,10 @@ import numpy as np
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-API = "http://127.0.0.1:8720"
+from harness import API, pedal, preset, require_running, source  # noqa: E402
+
 BOUNDARY = b"--frame"
 
 
@@ -64,51 +66,41 @@ def held_share(frames: list[np.ndarray]) -> float:
     return held / (len(frames) - 1)
 
 
+# Dropped frames are NOT asserted on here. The preview stream skips on purpose,
+# sleeping 1/30 s between parts while the pipeline also runs at 30 fps, so a run
+# of held frames can be sampled as a single one and the share measured off this
+# stream swings between 0.03 and 0.33 for identical settings. That assertion
+# lives in test_virtual_camera.py, which reads a real capture device.
+
+
 def detail(frame: np.ndarray) -> float:
     """Edge energy. Compression and resolution loss both flatten it."""
     grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     return float(cv2.Laplacian(grey, cv2.CV_64F).var())
 
 
-def preset(name: str) -> None:
-    requests.post(f"{API}/api/preset/{name}", timeout=5).raise_for_status()
-    time.sleep(0.6)
-
-
-def source(kind: str) -> None:
-    """Swap the camera for the generated pattern, or back.
-
-    The effects are measured against the pattern, not the camera. A covered
-    lens or a dark room produces an almost constant frame, and against that a
-    dropped frame and a delivered one are indistinguishable, so the test would
-    report a failure that says nothing about the code.
-    """
-    requests.post(f"{API}/api/settings", json={"video": {"source": kind}}, timeout=5).raise_for_status()
-    time.sleep(1.5)  # the chain restarts on a source change
-
-
-def pedal(action: str) -> dict:
-    res = requests.post(f"{API}/api/pedal/{action}", timeout=5)
-    res.raise_for_status()
-    return res.json()
-
-
 def main() -> int:
-    status = requests.get(f"{API}/api/state", timeout=5).json()["status"]["video"]
-    if not status["running"]:
-        print("video chain is not running:", status["error"])
+    video = require_running()
+    if video is None:
         return 1
-    print(f"\ncamera {status['camera']} on {status['backend']}, {status['fps']} fps")
-    print(f"virtual camera: {status['virtual_camera'] or 'not available'}")
+    print(f"\ncamera {video['camera']} on {video['backend']}, {video['fps']} fps")
+    print(f"virtual camera: {video['virtual_camera'] or 'not available'}")
 
-    live = grab(8)
-    live_detail = float(np.median([detail(f) for f in live])) if live else 0.0
-    print(f"real camera detail {live_detail:.1f}"
-          + ("" if live_detail > 40 else "   (dark or covered lens, effects measured on the pattern)"))
+    if video["backend"] != "pattern":
+        live = grab(8)
+        live_detail = float(np.median([detail(f) for f in live])) if live else 0.0
+        note = "" if live_detail > 40 else "   (dark or covered lens, effects measured on the pattern)"
+        print(f"real camera detail {live_detail:.1f}{note}")
 
-    source("pattern")
+    # The effects are measured against the generated pattern, not the camera. A
+    # covered lens or a dark room gives an almost constant frame, and against
+    # that a dropped frame and a delivered one are indistinguishable.
+    with source("pattern"):
+        return measure()
+
+
+def measure() -> int:
     print()
-
     preset("perfect")
     clean = grab(40)
     clean_held = held_share(clean)
@@ -131,12 +123,11 @@ def main() -> int:
     time.sleep(2.0)
     recorded = pedal("record-stop")
     time.sleep(0.5)
-    looping = requests.get(f"{API}/api/state", timeout=5).json()["status"]["video"]["pedal"]
+    looping = require_running()["pedal"]
     loop_frames = grab(30)
     pedal("live")
     time.sleep(0.8)
-    after = requests.get(f"{API}/api/state", timeout=5).json()["status"]["video"]["pedal"]
-    source("camera")
+    after = require_running()["pedal"]
     print(f"\n  pedal: recorded {recorded['pedal']['recorded']} frames, "
           f"loop {looping['loop_frames']} frames, state while looping {looping['state']!r}, "
           f"after going live {after['state']!r}")
@@ -145,7 +136,6 @@ def main() -> int:
     checks = [
         ("preview delivers frames", len(clean) >= 30),
         ("a clean line does not hold frames", clean_held < 0.25),
-        ("degradation holds frames", bad_held > clean_held + 0.2),
         ("degradation flattens detail", bad_detail < clean_detail * 0.9),
         ("holding the pedal records", recorded["pedal"]["recorded"] > 30),
         ("release builds a loop", recorded["result"] is True and looping["loop_frames"] > 0),
