@@ -194,6 +194,45 @@ def test_link_is_reproducible_for_a_given_seed():
     assert run() == run()
 
 
+def test_re_apply_renders_the_same_take_the_same_way_twice():
+    """The whole point of re-apply is comparing settings, not random draws.
+
+    `_render` replays the stored take against a fresh chain. Unseeded, the
+    stall draw and the packet-loss draw are new on every press, and two renders
+    of one preset differed more than two presets differ from each other:
+    `barely there` measured 0.034, 0.060 and 0.049 RMS over three passes on the
+    same 13 s take. Nobody can tune a weight by ear against that.
+    """
+    from src.audio import AudioPipeline
+
+    rng = np.random.default_rng(7)
+    blocksize = Settings().audio.blocksize
+    # Voiced blocks with gaps, so concealment and stalls have something to bite.
+    take = []
+    for i in range(240):
+        loud = (i % 40) < 28
+        block = np.sin(np.linspace(0, 60, blocksize)).astype(np.float32)
+        block = block * (0.4 if loud else 0.001)
+        take.append((block + rng.normal(0, 0.005, blocksize)).astype(np.float32))
+
+    def render(preset: str) -> np.ndarray:
+        store = SettingsStore()
+        cfg = store.apply_audio_preset(preset)
+        pipe = AudioPipeline(store, None)
+        return pipe._render(take, cfg)
+
+    for preset in ("choppy", "robot", "barely there"):
+        first, second = render(preset), render(preset)
+        assert np.array_equal(first, second), (
+            f"re-apply on {preset!r} gave a different render the second time, "
+            f"max difference {float(np.abs(first - second).max()):.5f}"
+        )
+
+    # And it must still be a render, not a pass-through that trivially matches.
+    assert not np.array_equal(render("choppy"), render("barely there")), \
+        "two different presets rendered identically, so the seed is fixing more than the draw"
+
+
 def test_link_thread_publishes_snapshots():
     store = SettingsStore(Settings(link=LinkSettings(enabled=True, quality=30.0, drift=20.0)))
     sim = LinkSimulator(store, tick=0.005)

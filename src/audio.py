@@ -28,6 +28,11 @@ import sounddevice as sd
 from .audiofx import AudioDegrader, JitterBuffer
 from .config import SettingsStore
 
+# Seed used when a render is asked for and the link carries no seed of its own.
+# Only the offline render uses it. The live chain stays unseeded, because a call
+# that repeats the same glitch in the same place is not a call.
+RENDER_SEED = 20260919
+
 log = logging.getLogger(__name__)
 
 
@@ -330,14 +335,25 @@ class AudioPipeline:
         """Run the stored blocks back through a fresh chain.
 
         The line is replayed from its own simulator rather than sampled live,
-        so pressing play twice on the same recording gives the same result and
-        a comparison between two settings is a comparison of the settings.
+        and both the simulator and the degrader are seeded, so pressing play
+        twice on the same recording gives the same result and a comparison
+        between two settings is a comparison of the settings.
+
+        Seeding is not decoration. Unseeded, the stall draw and the packet-loss
+        draw are fresh every render, and two renders of one preset differed by
+        more than two presets differ from each other: `barely there` measured
+        0.034, 0.060 and 0.049 RMS on three passes over the same take. Tuning
+        by ear against that is tuning against noise.
         """
+        from dataclasses import replace
+
         from .state import LinkSimulator
 
-        store = SettingsStore(cfg)
+        seed = cfg.link.seed or RENDER_SEED
+        link_cfg = replace(cfg.link, seed=seed)
+        store = SettingsStore(replace(cfg, link=link_cfg))
         sim = LinkSimulator(store)
-        degrader = AudioDegrader(samplerate=cfg.audio.samplerate)
+        degrader = AudioDegrader(samplerate=cfg.audio.samplerate, seed=seed)
         jitter = JitterBuffer(blocksize=cfg.audio.blocksize)
 
         step = cfg.audio.blocksize / max(1, cfg.audio.samplerate)
@@ -345,7 +361,7 @@ class AudioPipeline:
         out_blocks = []
         for block in raw:
             now += step
-            snap = sim._advance(cfg.link, step, now)
+            snap = sim._advance(link_cfg, step, now)
             processed = degrader.apply(block, snap, cfg.audio)
             extra = snap.latency + max(0.0, snap.desync)
             depth = int(extra * cfg.audio.samplerate / max(1, cfg.audio.blocksize))
