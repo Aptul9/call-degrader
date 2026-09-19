@@ -176,6 +176,15 @@ def _run_headless(controller, args) -> int:
             host=args.host,
             port=args.port,
             log_level="warning",
+            # Keep uvicorn away from the logging setup. Its default is a
+            # dictConfig that tears down the existing handlers and builds new
+            # ones on sys.stdout and sys.stderr, which a windowed build does
+            # not have: `--no-window` from a launch with no console died with
+            # exit 1 and nothing in the log, because the file handler had
+            # already been removed by the time it raised. None leaves
+            # _setup_output's handlers alone, so uvicorn's own messages land
+            # in the same file as everything else.
+            log_config=None,
         )
     except KeyboardInterrupt:
         pass
@@ -204,7 +213,8 @@ def _run_windowed(controller, args) -> int:
 
     host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
     config = uvicorn.Config(
-        create_app(controller), host=args.host, port=args.port, log_level="warning"
+        create_app(controller), host=args.host, port=args.port,
+        log_level="warning", log_config=None,  # same reason as the headless path
     )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, name="http", daemon=True)

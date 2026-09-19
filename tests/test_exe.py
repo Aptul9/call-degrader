@@ -155,6 +155,55 @@ def check_bundle(label: str, exe: Path, port: int) -> list[str]:
     return failures
 
 
+def check_no_console(exe: Path, port: int) -> list[str]:
+    """Run it with no console at all, which is how it is actually launched.
+
+    Every other check here hands the child a stdout pipe, so `sys.stdout` is a
+    real object and the no-console case is never exercised. It was broken that
+    whole time: `--no-window` from a launch with no console exited 1 after two
+    seconds, because uvicorn's default logging config builds StreamHandlers on
+    sys.stdout and sys.stderr, which are None there. Nothing reached the log
+    either, since that same dictConfig had already removed the file handler.
+
+    DETACHED_PROCESS is what reproduces it. Redirecting to DEVNULL does not:
+    that still hands over a real handle.
+    """
+    failures: list[str] = []
+    print("\nno console at all, both modes:")
+
+    for label, extra in (("windowed", []), ("--no-window", ["--no-window"])):
+        proc = subprocess.Popen(
+            [str(exe), "--port", str(port)] + extra,
+            creationflags=0x00000008,  # DETACHED_PROCESS
+        )
+        base = f"http://127.0.0.1:{port}"
+        try:
+            served = False
+            deadline = time.monotonic() + 40
+            while time.monotonic() < deadline:
+                if proc.poll() is not None:
+                    break
+                try:
+                    _get(base, "/", timeout=1.5)
+                    served = True
+                    break
+                except (urllib.error.URLError, OSError, TimeoutError):
+                    time.sleep(0.3)
+
+            alive = proc.poll() is None
+            print(f"  {'ok  ' if alive else 'FAIL'} {label}: survived"
+                  f"{'' if alive else f' (exit {proc.returncode})'}")
+            if not alive:
+                failures.append(f"no console, {label}: exited")
+            print(f"  {'ok  ' if served else 'FAIL'} {label}: serving")
+            if not served:
+                failures.append(f"no console, {label}: never served")
+        finally:
+            _kill_tree(proc)
+        port += 1
+    return failures
+
+
 def _windows_of(pid: int) -> list[int]:
     """Visible top-level windows belonging to a process, by title."""
     import ctypes
@@ -314,6 +363,7 @@ def main() -> int:
     # and the single file only wraps it, so running it twice buys nothing but
     # another window in someone's face.
     failures += check_window(present[0][1], 8743)
+    failures += check_no_console(present[0][1], 8751)
 
     print(f"\n{len(failures)} failure(s)")
     return 1 if failures else 0
