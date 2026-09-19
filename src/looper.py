@@ -38,6 +38,8 @@ class Looper:
         self._buffer: deque[bytes] = deque()
         self._loop: list[bytes] = []
         self._cursor = 0
+        self._step = 1  # +1 walking forward, -1 walking back, for bounce mode
+        self._mode = "bounce"
         # Dissolve between live and loop: frames remaining, and which way.
         self._fade_left = 0
         self._fade_total = 0
@@ -69,7 +71,7 @@ class Looper:
             self._buffer = deque(maxlen=max(1, int(max_seconds * self.fps)))
             self._state = State.REC
 
-    def stop_record(self, min_seconds: float, crossfade: float) -> bool:
+    def stop_record(self, min_seconds: float, crossfade: float, mode: str = "bounce") -> bool:
         """Build the loop and switch to it. False if too short to be one."""
         with self._lock:
             if self._state is not State.REC:
@@ -78,10 +80,23 @@ class Looper:
             if len(frames) < max(2, int(min_seconds * self.fps)):
                 self._state = State.LIVE
                 return False
-            self._loop = _seal(frames, int(crossfade * self.fps), self.quality)
-            # Start a little before the seam, so the first thing seen is the
-            # wrap-around already in progress rather than a clean first frame.
-            self._cursor = max(0, len(self._loop) - int(crossfade * self.fps))
+
+            self._mode = mode if mode in ("bounce", "crossfade") else "bounce"
+            if self._mode == "bounce":
+                # Nothing to seal. Playback runs to the end and walks back, so
+                # the join is the same frame rather than a join at all.
+                self._loop = frames
+                self._cursor, self._step = 0, 1
+            else:
+                self._loop = _seal(frames, int(crossfade * self.fps), self.quality)
+                # Start a little before the seam, so the first thing seen is the
+                # wrap-around already in progress rather than a clean first
+                # frame. The modulo matters: with no crossfade this lands
+                # exactly on len(), which is off the end of the list.
+                back = int(crossfade * self.fps)
+                self._cursor = (len(self._loop) - back) % len(self._loop)
+                self._step = 1
+
             self._state = State.LOOP
             self._begin_fade(int(crossfade * self.fps), to_loop=True)
             return True
@@ -154,10 +169,38 @@ class Looper:
             return _blend(self._last_live, out_frame, overlay_alpha)
 
     def _advance_loop(self) -> np.ndarray | None:
-        if not self._loop:
+        """Next frame of the loop.
+
+        Crossfade mode wraps from the end back to the start, and the blended
+        region built by `_seal` covers the join. The content still has to
+        travel from the last pose back to the first one, so the join reads as a
+        dissolve between two different moments: a reset with a fade over it.
+
+        Bounce mode plays to the end and walks back to the start. There is no
+        join to hide, because the frame before the turn and the frame after it
+        are neighbours in the recording. What it costs is direction: half the
+        cycle runs backwards, which is invisible on idle movement and obvious
+        on anything with a clear direction, such as a hand reaching for a mug.
+        """
+        n = len(self._loop)
+        if n == 0:
             return None
-        raw = self._loop[self._cursor % len(self._loop)]
-        self._cursor = (self._cursor + 1) % len(self._loop)
+        if n == 1:
+            return _decode(self._loop[0])
+
+        raw = self._loop[self._cursor]
+
+        if self._mode == "bounce":
+            self._cursor += self._step
+            # Turn at the ends without repeating the end frame, so the turn
+            # keeps a constant frame rate instead of stuttering on one image.
+            if self._cursor >= n:
+                self._cursor, self._step = n - 2, -1
+            elif self._cursor < 0:
+                self._cursor, self._step = 1, 1
+        else:
+            self._cursor = (self._cursor + 1) % n
+
         return _decode(raw)
 
 

@@ -159,6 +159,21 @@ legend {
 
 .field { display: grid; grid-template-columns: 1fr 150px 54px; align-items: center; gap: 10px; }
 .field > span:first-child { font-size: 13px; color: var(--muted); }
+.field-pick { grid-template-columns: 1fr minmax(0, 190px) auto; margin-bottom: 10px; }
+
+select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+select:disabled { color: var(--muted); }
+
+.btn-small { padding: 6px 10px; font-size: 12px; }
 .field output { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text); text-align: right; }
 
 input[type="range"] { width: 100%; accent-color: var(--accent); }

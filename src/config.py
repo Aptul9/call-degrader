@@ -18,6 +18,13 @@ class LinkSettings:
     enabled: bool = False
     # Steady-state quality, 0 = unusable, 100 = perfect.
     quality: float = 100.0
+    # Quality can never rise above this, however far the walk wanders. A line
+    # that is genuinely bad recovers to tolerable, not to flawless, and a
+    # recovery that touches 100 reads as the problem having gone away.
+    ceiling: float = 100.0
+    # Nor below this. Keeps a constantly-poor line poor instead of letting it
+    # bottom out into what looks like a dropped connection.
+    floor: float = 0.0
     # How far quality wanders around the set point, in points.
     drift: float = 8.0
     # Stalls per minute and how long one lasts, in seconds.
@@ -39,10 +46,23 @@ class VideoSettings:
     # tested on a machine where the camera is dark or in use.
     source: str = "camera"
     camera: int = 0
+    # Which capture backend `camera` is an index into. MSMF and DirectShow
+    # enumerate in different orders on Windows, so an index is only meaningful
+    # alongside the backend it came from. The picker lists DirectShow devices,
+    # because that is the only backend whose devices can be named, and pins
+    # this to "dshow" when you choose one. "auto" keeps the old behaviour of
+    # trying each backend in turn.
+    backend: str = "auto"
     width: int = 1280
     height: int = 720
     fps: int = 30
     mirror: bool = True
+    # Degrade brightness only and put the original colour back afterwards.
+    # A starved codec really does wreck chroma, but the result is a picture
+    # whose colours crawl, which looks like a fault in the camera rather than
+    # in the line, and is unpleasant to watch. On, the feed still blurs, blocks,
+    # drops and smears; it just keeps its palette.
+    keep_colours: bool = True
     # Each weight scales how hard that effect reacts to falling quality.
     # 0 disables the effect, 1 is the tuned default.
     drop_weight: float = 1.0
@@ -82,7 +102,21 @@ class PedalSettings:
     max_seconds: float = 30.0
     min_seconds: float = 1.0
     crossfade: float = 0.5
-    # Opacity of the loop ghosted over the live feed in the preview only.
+    # "bounce" plays to the end then walks back to the start, so there is no
+    # join to hide: the frame before the turn and the frame after it are
+    # neighbours in the recording. "crossfade" wraps end to start and dissolves
+    # over the join, which still has to travel from the last pose back to the
+    # first, so it reads as a reset with a fade over it. Bounce costs
+    # direction: half the cycle runs backwards, invisible on idle movement,
+    # obvious on anything directional.
+    loop_mode: str = "bounce"
+    # Ghost the live camera under the playing loop, in the preview only. It
+    # helps you line yourself back up before going live, and it is also two
+    # copies of you moving out of step, which is unpleasant to sit in front of
+    # for any length of time. Off means the preview shows exactly what the call
+    # is getting.
+    ghost: bool = True
+    # Opacity of that ghost when it is on.
     overlay: float = 0.5
     # Freeze the audio too while the video loops, so a moving mouth on a loop
     # is not betrayed by live speech.
@@ -100,14 +134,29 @@ class Settings:
         return asdict(self)
 
 
+# Every preset sets every field it cares about, ceiling and floor included.
+# A preset that leaves one out inherits whatever the previous preset left
+# behind, so switching from a capped line to `perfect` would silently keep the
+# cap and the line would never look clean again.
 PRESETS: dict[str, dict] = {
     "perfect": {
-        "link": {"enabled": False, "quality": 100.0, "drift": 0.0, "stall_rate": 0.0},
+        "link": {
+            "enabled": False,
+            "quality": 100.0,
+            "ceiling": 100.0,
+            "floor": 0.0,
+            "drift": 0.0,
+            "stall_rate": 0.0,
+            "latency": 0.0,
+            "desync": 0.0,
+        },
     },
     "slightly-off": {
         "link": {
             "enabled": True,
             "quality": 78.0,
+            "ceiling": 92.0,
+            "floor": 55.0,
             "drift": 6.0,
             "stall_rate": 1.5,
             "stall_min": 0.2,
@@ -116,10 +165,44 @@ PRESETS: dict[str, dict] = {
             "desync": 0.08,
         },
     },
+    # Bad the whole way through. A narrow band and almost no drift, so it never
+    # improves and never collapses either: the line is simply poor, constantly.
+    "always-rough": {
+        "link": {
+            "enabled": True,
+            "quality": 32.0,
+            "ceiling": 40.0,
+            "floor": 24.0,
+            "drift": 3.0,
+            "stall_rate": 2.0,
+            "stall_min": 0.3,
+            "stall_max": 1.0,
+            "latency": 0.4,
+            "desync": 0.15,
+        },
+    },
+    # Wanders a lot and does recover, but only as far as tolerable. The ceiling
+    # is what stops it reading as fixed.
+    "never-perfect": {
+        "link": {
+            "enabled": True,
+            "quality": 50.0,
+            "ceiling": 68.0,
+            "floor": 15.0,
+            "drift": 16.0,
+            "stall_rate": 5.0,
+            "stall_min": 0.3,
+            "stall_max": 1.6,
+            "latency": 0.3,
+            "desync": 0.15,
+        },
+    },
     "bad-wifi": {
         "link": {
             "enabled": True,
             "quality": 48.0,
+            "ceiling": 72.0,
+            "floor": 12.0,
             "drift": 14.0,
             "stall_rate": 6.0,
             "stall_min": 0.4,
@@ -132,6 +215,8 @@ PRESETS: dict[str, dict] = {
         "link": {
             "enabled": True,
             "quality": 22.0,
+            "ceiling": 45.0,
+            "floor": 0.0,
             "drift": 18.0,
             "stall_rate": 14.0,
             "stall_min": 0.8,
@@ -144,6 +229,8 @@ PRESETS: dict[str, dict] = {
         "link": {
             "enabled": True,
             "quality": 8.0,
+            "ceiling": 22.0,
+            "floor": 0.0,
             "drift": 8.0,
             "stall_rate": 22.0,
             "stall_min": 1.5,

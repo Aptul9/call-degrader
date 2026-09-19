@@ -13,7 +13,7 @@ from .audio import AudioPipeline, list_devices, set_default_microphone
 from .config import PRESETS, Settings, SettingsStore
 from .hotkeys import Hotkeys
 from .state import LinkSimulator
-from .video import VideoPipeline
+from .video import VideoPipeline, list_cameras
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +52,9 @@ class Controller:
 
     def record_stop(self) -> bool:
         pedal = self.settings.get().pedal
-        return self.video.looper.stop_record(pedal.min_seconds, pedal.crossfade)
+        return self.video.looper.stop_record(
+            pedal.min_seconds, pedal.crossfade, pedal.loop_mode
+        )
 
     def go_live(self) -> None:
         self.video.looper.go_live(self.settings.get().pedal.crossfade)
@@ -79,7 +81,7 @@ class Controller:
         if before.video.enabled != after.video.enabled:
             self.video.start() if after.video.enabled else self.video.stop()
         elif after.video.enabled and _differs(
-            before.video, after.video, ("source", "camera", "width", "height", "fps")
+            before.video, after.video, ("source", "camera", "backend", "width", "height", "fps")
         ):
             self.video.stop()
             self.video.start()
@@ -120,6 +122,10 @@ class Controller:
     @staticmethod
     def devices() -> dict:
         return list_devices()
+
+    @staticmethod
+    def cameras() -> list[dict]:
+        return list_cameras()
 
     @staticmethod
     def route_microphone(match: str = "CABLE Output") -> str:

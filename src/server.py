@@ -37,11 +37,24 @@ def create_app(controller: Controller) -> FastAPI:
 
     # -- UI ------------------------------------------------------------
 
-    app.mount("/static", StaticFiles(directory=UI_DIR), name="static")
+    # The UI is edited while the tool is running, and a browser that keeps its
+    # cached copy shows an old page with no sign that it is doing so. A new
+    # control simply does not appear and it looks like the feature was never
+    # built. Nothing here is worth caching: it is all served from localhost.
+    class NoCacheStatic(StaticFiles):
+        def file_response(self, *args, **kwargs):
+            response = super().file_response(*args, **kwargs)
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+            return response
+
+    app.mount("/static", NoCacheStatic(directory=UI_DIR), name="static")
 
     @app.get("/")
     def index():
-        return FileResponse(UI_DIR / "index.html")
+        return FileResponse(
+            UI_DIR / "index.html",
+            headers={"Cache-Control": "no-store, must-revalidate"},
+        )
 
     # -- state ---------------------------------------------------------
 
@@ -52,6 +65,10 @@ def create_app(controller: Controller) -> FastAPI:
     @app.get("/api/devices")
     def devices():
         return controller.devices()
+
+    @app.get("/api/cameras")
+    def cameras():
+        return {"cameras": controller.cameras()}
 
     @app.post("/api/settings")
     async def settings(payload: dict):

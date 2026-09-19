@@ -5,6 +5,8 @@
 const FIELDS = {
   link: [
     ['quality',    'quality',            0, 100, 1],
+    ['ceiling',    'best it ever gets',  0, 100, 1],
+    ['floor',      'worst it ever gets', 0, 100, 1],
     ['drift',      'wander',             0, 30,  0.5],
     ['stall_rate', 'stalls per minute',  0, 30,  0.5],
     ['stall_min',  'shortest stall (s)', 0, 5,   0.1],
@@ -35,9 +37,21 @@ const FIELDS = {
   ],
 };
 
+const SELECTS = {
+  pedal: [['loop_mode', 'loop style', [
+    ['bounce', 'bounce (plays back and forth, no join)'],
+    ['crossfade', 'crossfade (wraps, dissolves the join)'],
+  ]]],
+};
+
 const TOGGLES = {
+  video: [['keep_colours', 'keep colours (degrade brightness only)'], ['mirror', 'mirror the camera']],
   audio: [['monitor', 'monitor on speakers']],
-  pedal: [['enabled', 'hotkeys on'], ['mute_on_loop', 'mute mic while looping']],
+  pedal: [
+    ['enabled', 'hotkeys on'],
+    ['mute_on_loop', 'mute mic while looping'],
+    ['ghost', 'ghost live camera under the loop (preview only)'],
+  ],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -106,6 +120,19 @@ function buildGroup(section) {
     host.appendChild(row);
   }
 
+  for (const [field, label, options] of SELECTS[section] || []) {
+    const row = document.createElement('label');
+    row.className = 'field field-pick';
+    const name = document.createElement('span');
+    name.textContent = label;
+    const pick = document.createElement('select');
+    for (const [value, text] of options) pick.appendChild(new Option(text, value));
+    pick.value = settings[section][field];
+    pick.addEventListener('change', () => patch(section, field, pick.value));
+    row.append(name, pick);
+    host.appendChild(row);
+  }
+
   for (const [field, label] of TOGGLES[section] || []) {
     const row = document.createElement('label');
     row.className = 'toggle';
@@ -123,6 +150,48 @@ function buildGroup(section) {
 function fmt(value) {
   const n = parseFloat(value);
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+// The picker lists DirectShow devices, so the chosen index is only meaningful
+// with that backend. Both are sent together; sending the index alone would pick
+// a different camera, because MSMF enumerates in its own order.
+async function buildCameras() {
+  const pick = $('camera-pick');
+  pick.innerHTML = '';
+  let cameras = [];
+  try {
+    cameras = (await (await fetch('/api/cameras')).json()).cameras || [];
+  } catch (err) {
+    showError(`could not list cameras: ${err.message}`);
+  }
+
+  if (!cameras.length) {
+    pick.appendChild(new Option('no camera found', ''));
+    pick.disabled = true;
+    return;
+  }
+
+  pick.disabled = false;
+  for (const cam of cameras) {
+    pick.appendChild(new Option(`${cam.index}: ${cam.name}`, String(cam.index)));
+  }
+  const current = String(settings.video.camera);
+  if (cameras.some((c) => String(c.index) === current)) pick.value = current;
+
+  pick.onchange = async () => {
+    const index = parseInt(pick.value, 10);
+    if (Number.isNaN(index)) return;
+    settings.video.camera = index;
+    settings.video.backend = 'dshow';
+    try {
+      // Not through patch(): the video chain restarts on this, and the
+      // coalescing there would let a second change race the restart.
+      settings = (await send('/api/settings',
+        { video: { camera: index, backend: 'dshow' } })).settings;
+    } catch (err) {
+      showError(err.message);
+    }
+  };
 }
 
 function buildPresets(names) {
@@ -145,6 +214,7 @@ function buildPresets(names) {
 
 function render() {
   for (const section of Object.keys(FIELDS)) buildGroup(section);
+  buildCameras();
   const linkToggle = document.querySelector('[data-path="link.enabled"]');
   linkToggle.checked = settings.link.enabled;
 }
@@ -175,6 +245,7 @@ function wirePedal() {
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
 
+  $('btn-rescan').addEventListener('click', buildCameras);
   $('btn-live').addEventListener('click', () => send('/api/pedal/live'));
   $('btn-clear').addEventListener('click', () => send('/api/pedal/clear'));
 

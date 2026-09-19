@@ -127,7 +127,7 @@ class LinkSimulator:
             self._rng.seed(cfg.seed)
             self._seeded_with = cfg.seed
 
-        self._level = self._walk(self._level, cfg.quality, cfg.drift, dt)
+        self._level = self._walk(self._level, cfg, dt)
         self._maybe_stall(cfg, dt, now)
 
         stalled = now < self._stall_until
@@ -149,12 +149,18 @@ class LinkSimulator:
             at=now,
         )
 
-    def _walk(self, level: float, setpoint: float, drift: float, dt: float) -> float:
-        if drift <= 0.0:
+    def _walk(self, level: float, cfg: LinkSettings, dt: float) -> float:
+        # The band the line is allowed to live in. A ceiling under 100 is what
+        # makes a bad connection stay a bad connection: without it the walk
+        # eventually touches perfect and the far end reads it as recovered.
+        lo = _clamp(cfg.floor, 0.0, 100.0)
+        hi = _clamp(cfg.ceiling, lo, 100.0)
+        setpoint = _clamp(cfg.quality, lo, hi)
+        if cfg.drift <= 0.0:
             return setpoint
         pull = self.THETA * (setpoint - level) * dt
-        kick = drift * math.sqrt(dt) * self._rng.gauss(0.0, 1.0)
-        return _clamp(level + pull + kick, 0.0, 100.0)
+        kick = cfg.drift * math.sqrt(dt) * self._rng.gauss(0.0, 1.0)
+        return _clamp(level + pull + kick, lo, hi)
 
     def _maybe_stall(self, cfg: LinkSettings, dt: float, now: float) -> None:
         if now < self._stall_until or cfg.stall_rate <= 0.0:

@@ -193,7 +193,7 @@ class VideoPipeline:
 
     def _publish_preview(self, out: np.ndarray, settings) -> None:
         shown = out
-        if self.looper.state is State.LOOP:
+        if self.looper.state is State.LOOP and settings.pedal.ghost:
             shown = self.looper.preview(out, settings.pedal.overlay)
         shown = _annotate(shown, self.looper.state, self._link.get())
         ok, buf = cv2.imencode(".jpg", shown, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
@@ -271,8 +271,39 @@ class _TestPattern:
         return True, frame
 
 
+def list_cameras() -> list[dict]:
+    """Cameras that can be picked, by name, with the virtual one excluded.
+
+    Offering our own output as an input would let someone feed the tool back
+    into itself, which produces a recursive picture and holds the device open
+    against the write we are about to make.
+    """
+    try:
+        from pygrabber.dshow_graph import FilterGraph
+
+        names = FilterGraph().get_input_devices()
+    except Exception as exc:
+        log.warning("could not enumerate cameras: %s", exc)
+        return []
+
+    out = []
+    for index, name in enumerate(names):
+        if any(bad in name.lower() for bad in ("obs virtual camera", "unitycapture")):
+            continue
+        out.append({"index": index, "name": name})
+    return out
+
+
 def _open_camera(cfg):
-    for name, api in _BACKENDS:
+    wanted = (cfg.backend or "auto").lower()
+    backends = _BACKENDS if wanted == "auto" else [
+        (n, a) for n, a in _BACKENDS if n.lower() == wanted
+    ]
+    if not backends:
+        log.warning("unknown capture backend %r, falling back to auto", cfg.backend)
+        backends = _BACKENDS
+
+    for name, api in backends:
         cap = cv2.VideoCapture(cfg.camera, api)
         if not cap.isOpened():
             cap.release()

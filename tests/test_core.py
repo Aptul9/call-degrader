@@ -92,6 +92,55 @@ def test_link_stalls_and_wanders_when_enabled():
     assert 0.0 <= min(levels) and max(levels) <= 100.0
 
 
+def test_quality_never_rises_above_the_ceiling():
+    """The point of the ceiling: a bad line recovers to tolerable, not to fine.
+
+    Without it the walk eventually touches 100 and the far end reads the
+    problem as having gone away.
+    """
+    store = SettingsStore(Settings(link=LinkSettings(
+        enabled=True, quality=60.0, ceiling=65.0, floor=20.0,
+        drift=30.0, stall_rate=0.0, seed=3,
+    )))
+    sim = LinkSimulator(store)
+    cfg = store.get().link
+    levels = [sim._advance(cfg, 0.01, i * 0.01).quality for i in range(1, 4000)]
+    assert max(levels) <= 65.0 + 1e-6, f"ceiling breached: {max(levels)}"
+    assert min(levels) >= 20.0 - 1e-6, f"floor breached: {min(levels)}"
+    assert max(levels) > 60.0, "a wide drift should still reach up towards the ceiling"
+
+
+def test_a_set_point_outside_the_band_is_pulled_inside_it():
+    store = SettingsStore(Settings(link=LinkSettings(
+        enabled=True, quality=95.0, ceiling=40.0, floor=10.0, drift=0.0, stall_rate=0.0,
+    )))
+    sim = LinkSimulator(store)
+    snap = sim._advance(store.get().link, 0.01, 1.0)
+    assert snap.quality == 40.0, "a set point above the ceiling settles on the ceiling"
+
+
+def test_every_preset_sets_ceiling_and_floor():
+    """A preset that omits them inherits the previous one's cap.
+
+    Switching from a capped line back to `perfect` would otherwise keep the cap
+    and the feed would never look clean again.
+    """
+    from src.config import PRESETS
+
+    for name, preset in PRESETS.items():
+        link = preset.get("link", {})
+        assert "ceiling" in link, f"preset {name!r} does not set ceiling"
+        assert "floor" in link, f"preset {name!r} does not set floor"
+        assert link["floor"] <= link["ceiling"], f"preset {name!r} has floor above ceiling"
+
+
+def test_the_only_uncapped_preset_is_the_clean_one():
+    from src.config import PRESETS
+
+    uncapped = [n for n, p in PRESETS.items() if p["link"]["ceiling"] >= 100.0]
+    assert uncapped == ["perfect"], f"these presets can still reach perfect: {uncapped}"
+
+
 def test_link_is_reproducible_for_a_given_seed():
     def run():
         store = SettingsStore(Settings(link=LinkSettings(
@@ -161,6 +210,58 @@ def test_every_video_effect_runs_on_its_own():
         assert out is not None, f"{name} returned nothing"
         assert out.shape == src.shape, f"{name} changed the frame shape"
         assert out.dtype == src.dtype, f"{name} changed the frame dtype"
+
+
+def test_keeping_colours_changes_the_palette_and_nothing_else():
+    """The switch has to change the colour and nothing else.
+
+    Banding is the effect that motivates it: measured on a gradient it is both
+    the largest hue shift of the three and the only one that raises edge
+    energy, because posterisation turns a smooth ramp into hard steps.
+    """
+    from dataclasses import replace
+
+    import cv2
+
+    h, w = 120, 200
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    src = np.stack([
+        (110 + 70 * np.sin(xx / 30)).clip(0, 255),
+        (135 + 60 * np.cos(yy / 22)).clip(0, 255),
+        (175 + 55 * np.sin((xx + yy) / 35)).clip(0, 255),
+    ], axis=-1).astype(np.uint8)
+
+    def hue_shift(a, b):
+        ha = cv2.cvtColor(a, cv2.COLOR_BGR2HSV).astype(np.int16)[..., 0]
+        hb = cv2.cvtColor(b, cv2.COLOR_BGR2HSV).astype(np.int16)[..., 0]
+        return float(np.minimum(np.abs(ha - hb), 180 - np.abs(ha - hb)).mean())
+
+    def luma(f):
+        return cv2.cvtColor(f, cv2.COLOR_BGR2YCrCb)[..., 0]
+
+    hard = snapshot(severity=0.95, quality=5.0)
+    drifting = replace(Settings().video, keep_colours=False, drop_weight=0.0, tearing_weight=0.0)
+    kept = replace(drifting, keep_colours=True)
+
+    a = VideoDegrader(seed=2)
+    a.apply(src, snapshot(), drifting)
+    loose = a.apply(src, hard, drifting)
+
+    b = VideoDegrader(seed=2)
+    b.apply(src, snapshot(), kept)
+    held = b.apply(src, hard, kept)
+
+    assert hue_shift(src, held) < hue_shift(src, loose) / 3, "colours must stay put"
+
+    # The switch must be chroma-only: every bit of blur, blocking and
+    # posterisation the chain produced has to survive it untouched. Comparing
+    # luminance is the exact statement of that; comparing edge energy is not,
+    # because on a smooth source these effects *add* edges rather than remove
+    # them (2.28 to 100.76 on this gradient).
+    # Within one quantisation step: the BGR/YCrCb round trip rounds, and
+    # measured on this frame no pixel moves by more than 1 level in 255.
+    drift = np.abs(luma(held).astype(np.int16) - luma(loose).astype(np.int16))
+    assert drift.max() <= 1, f"keeping colours moved brightness by {drift.max()} levels"
 
 
 def test_banding_quantises_without_darkening():
@@ -247,6 +348,17 @@ def test_jitter_buffer_delays_by_the_requested_depth():
 # -- looper -------------------------------------------------------------
 
 
+def test_camera_list_never_offers_the_virtual_camera():
+    """Offering our own output as an input is a feedback loop.
+
+    It also holds the device open against the write the tool is about to make.
+    """
+    from src.video import list_cameras
+
+    names = [c["name"].lower() for c in list_cameras()]
+    assert not [n for n in names if "obs virtual camera" in n or "unitycapture" in n]
+
+
 def test_recording_too_short_refuses_to_become_a_loop():
     lp = Looper(fps=30)
     lp.start_record(max_seconds=5)
@@ -257,11 +369,12 @@ def test_recording_too_short_refuses_to_become_a_loop():
 
 
 def test_a_loop_is_built_sealed_and_played_back():
+    """Crossfade mode specifically: bounce does no sealing, it has no join."""
     lp = Looper(fps=30)
     lp.start_record(max_seconds=5)
     for i in range(60):
         lp.process(frame(i, 64, 36))
-    assert lp.stop_record(min_seconds=1.0, crossfade=0.2) is True
+    assert lp.stop_record(min_seconds=1.0, crossfade=0.2, mode="crossfade") is True
     assert lp.state is State.LOOP
 
     fade = int(0.2 * 30)
@@ -270,6 +383,52 @@ def test_a_loop_is_built_sealed_and_played_back():
     live = frame(999, 64, 36)
     seen = [lp.process(live) for _ in range(90)]
     assert all(f is not None and f.shape == live.shape for f in seen)
+
+
+def _loop_sequence(mode: str, count: int, recorded: int = 12) -> list[int]:
+    """Play a loop back and report which recorded frame each output is.
+
+    Each recorded frame is a flat image of a unique brightness, so the frame
+    that came out can be identified by reading one pixel.
+    """
+    lp = Looper(fps=10, quality=100)
+    lp.start_record(max_seconds=10)
+    for i in range(recorded):
+        lp.process(np.full((16, 16, 3), (i + 1) * 10, dtype=np.uint8))
+    assert lp.stop_record(min_seconds=0.1, crossfade=0.0, mode=mode) is True
+
+    live = np.zeros((16, 16, 3), dtype=np.uint8)
+    seen = []
+    for _ in range(count):
+        out = lp.process(live)
+        seen.append(int(round(float(out[8, 8, 0]) / 10)) - 1)
+    return seen
+
+
+def test_a_bounce_loop_never_jumps():
+    """The complaint that motivated bounce: a wrapping loop resets.
+
+    Every step of a bounce is to an adjacent recorded frame, including across
+    the two turns, so there is no join to hide. A wrapping loop has one step
+    that leaps the whole recording, which is the reset that is visible however
+    much it is dissolved.
+    """
+    seen = _loop_sequence("bounce", 40)
+    steps = [abs(b - a) for a, b in zip(seen, seen[1:])]
+    assert set(steps) == {1}, f"bounce must only ever step one frame, got {sorted(set(steps))}"
+
+
+def test_a_bounce_loop_turns_around_at_both_ends():
+    seen = _loop_sequence("bounce", 40, recorded=6)
+    # 0 1 2 3 4 5 4 3 2 1 0 1 ... two turns, no frame repeated at the turn
+    assert seen[:12] == [0, 1, 2, 3, 4, 5, 4, 3, 2, 1, 0, 1], seen[:12]
+    assert max(seen) == 5 and min(seen) == 0
+
+
+def test_a_crossfade_loop_does_jump_and_that_is_the_difference():
+    seen = _loop_sequence("crossfade", 40)
+    steps = [abs(b - a) for a, b in zip(seen, seen[1:])]
+    assert max(steps) > 1, "a wrapping loop has to leap back to the start somewhere"
 
 
 def test_ring_buffer_keeps_the_newest_frames_only():
@@ -285,7 +444,7 @@ def test_going_live_dissolves_and_then_settles_on_live():
     lp.start_record(max_seconds=5)
     for i in range(60):
         lp.process(frame(i, 64, 36))
-    lp.stop_record(min_seconds=1.0, crossfade=0.2)
+    lp.stop_record(min_seconds=1.0, crossfade=0.2, mode="crossfade")
 
     live = frame(1234, 64, 36)
     for _ in range(30):
