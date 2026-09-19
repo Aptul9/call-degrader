@@ -87,6 +87,11 @@ class AudioSettings:
     output_device: str = "CABLE Input"
     samplerate: int = 48000
     blocksize: int = 480  # 10 ms at 48 kHz
+    # Release the microphone and write silence to the cable instead. Same
+    # bargain as the video pause: the input device is closed so the privacy
+    # indicator goes out, and the output stream stays open so a call in
+    # progress keeps seeing a live microphone rather than a device that died.
+    paused: bool = False
     # Monitor the processed signal on the speakers. Feedback risk on a laptop
     # mic, off by default.
     monitor: bool = False

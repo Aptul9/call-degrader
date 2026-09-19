@@ -209,13 +209,32 @@ def test_pausing_feeds_a_card_instead_of_opening_a_camera():
     assert source.read()[1].max() > 40
 
 
-def test_pausing_restarts_the_video_chain():
+def test_pausing_restarts_either_chain():
     from src.app import _differs
-    from src.config import VideoSettings
+    from src.config import AudioSettings, VideoSettings
 
-    watched = ("source", "camera", "backend", "paused", "width", "height", "fps")
-    assert _differs(VideoSettings(), VideoSettings(paused=True), watched), \
-        "pause changes what the chain opens, so it has to be read at start"
+    video = ("source", "camera", "backend", "paused", "width", "height", "fps")
+    audio = ("input_device", "output_device", "samplerate", "blocksize", "paused")
+    assert _differs(VideoSettings(), VideoSettings(paused=True), video), \
+        "pause changes what the video chain opens, so it has to be read at start"
+    assert _differs(AudioSettings(), AudioSettings(paused=True), audio), \
+        "pause changes what the audio chain opens, so it has to be read at start"
+
+
+def test_a_paused_card_is_never_mirrored():
+    """Mirror is for a lens pointed at you, not for a generated frame.
+
+    The card came out back to front with `mirror camera` on, because the flip
+    was applied to every frame the loop saw rather than to camera frames.
+    """
+    import inspect
+
+    from src import video as video_module
+
+    body = inspect.getsource(video_module.VideoPipeline._run)
+    assert 'generated = backend in ("paused", "pattern")' in body
+    assert "if cfg.mirror and not generated:" in body, \
+        "the flip has to skip sources that draw their own frames"
 
 
 def test_link_is_reproducible_for_a_given_seed():

@@ -126,6 +126,10 @@ class VideoPipeline:
             error=None,
         )
 
+        # Mirroring is for a lens pointed at you. A generated frame has no
+        # handedness, so flipping one only reverses the text written on it.
+        generated = backend in ("paused", "pattern")
+
         period = 1.0 / max(1, cfg.fps)
         next_due = time.monotonic()
         ticks, window_start = 0, time.monotonic()
@@ -139,7 +143,7 @@ class VideoPipeline:
                 if not ok or frame is None:
                     time.sleep(0.01)
                     continue
-                if cfg.mirror:
+                if cfg.mirror and not generated:
                     frame = cv2.flip(frame, 1)
 
                 snap = self._link.get()

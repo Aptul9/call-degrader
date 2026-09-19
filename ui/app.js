@@ -8,7 +8,6 @@
 // Always visible. Section, field, label.
 const QUICK_CHECKS = [
   ['link',  'enabled',      'bad line on'],
-  ['video', 'paused',       'pause camera (light goes out)'],
   ['video', 'keep_colours', 'keep colours'],
   ['video', 'mirror',       'mirror camera'],
   ['pedal', 'ghost',        'ghost me under the loop'],
@@ -279,6 +278,19 @@ function markAudioPreset(name) {
 // Every effect weight scales a reaction to a falling line. With the line off
 // they all multiply zero, so the sliders move and nothing happens. That is
 // exactly the trap this banner exists to close.
+function markPauses() {
+  for (const [id, section, off, on] of [
+    ['btn-pause-camera', 'video', 'pause camera', 'camera paused'],
+    ['btn-pause-mic', 'audio', 'pause mic', 'mic paused'],
+  ]) {
+    const btn = $(id);
+    if (!btn) continue;
+    const paused = Boolean(settings[section].paused);
+    btn.textContent = paused ? on : off;
+    btn.classList.toggle('on', paused);
+  }
+}
+
 function markInert() {
   const off = !settings.link.enabled;
   for (const note of document.querySelectorAll('[data-needs-link]')) note.hidden = !off;
@@ -298,6 +310,7 @@ function render() {
   buildCameras();
   markPreset(activePreset);
   markAudioPreset(activeAudioPreset);
+  markPauses();
   markInert();
 }
 
@@ -356,6 +369,16 @@ function wirePedal() {
   // leave it recording with the UI showing it as held.
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
+
+  // Buttons rather than checkboxes, and next to the pedal, because these two
+  // get pressed during a call: the device is released while they are on, so
+  // the camera light and the microphone indicator both go out.
+  for (const [id, section] of [['btn-pause-camera', 'video'], ['btn-pause-mic', 'audio']]) {
+    $(id).addEventListener('click', () => {
+      patch(section, 'paused', !settings[section].paused);
+      markPauses();
+    });
+  }
 
   $('btn-rescan').addEventListener('click', buildCameras);
   $('btn-live').addEventListener('click', () => send('/api/pedal/live'));

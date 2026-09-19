@@ -124,9 +124,15 @@ def create_app(controller: Controller) -> FastAPI:
         raw = (payload or {}).get("seconds")
         # No duration means hold-to-record: capture until the button comes up.
         seconds = None if raw is None else max(1.0, min(30.0, float(raw)))
-        if not controller.audio.status()["running"]:
+        state = controller.audio.status()
+        if not state["running"]:
             return JSONResponse(status_code=400, content={
                 "ok": False, "error": "the audio chain is not running"})
+        # Recording a released microphone gives two identical silent takes,
+        # which is the exact confusion the peak readout exists to prevent.
+        if state.get("paused"):
+            return JSONResponse(status_code=400, content={
+                "ok": False, "error": "the microphone is paused, nothing to record"})
         started = controller.audio.start_capture(seconds)
         return {"ok": True, "link_on": controller.settings.get().link.enabled, **started}
 

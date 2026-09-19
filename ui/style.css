@@ -147,6 +147,11 @@ main[hidden] { display: none; }
 .btn-rec { background: #3a1f24; border-color: #6a2b2b; }
 .btn-rec.held { background: var(--rec); color: #1a0d0f; border-color: var(--rec); }
 .btn-quiet { color: var(--muted); }
+
+/* Pushed away from the pedal: these release a device rather than drive the
+   loop, and a mis-click during a call is expensive either way round. */
+.pedal-gap { flex: 0 0 18px; }
+.btn-pause.on { background: var(--loop); color: #1c1608; border-color: var(--loop); }
 .btn-small { padding: 7px 11px; font-size: 12px; }
 
 .meters { display: flex; gap: 14px; margin-left: auto; }

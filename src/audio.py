@@ -121,6 +121,7 @@ class AudioPipeline:
         self._jitter: JitterBuffer | None = None
         self._queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
 
+        self._paused = False
         self._in_stream: sd.InputStream | None = None
         self._out_stream: sd.OutputStream | None = None
         self._lock = threading.Lock()
@@ -137,6 +138,7 @@ class AudioPipeline:
 
         self._status = {
             "running": False,
+            "paused": False,
             "input": None,
             "output": None,
             "samplerate": None,
@@ -150,7 +152,10 @@ class AudioPipeline:
 
     def start(self) -> None:
         with self._lock:
-            if self._in_stream is not None:
+            # Guard on the output stream, not the input one. Paused never opens
+            # an input, so an input-based guard would let a second start()
+            # through and leave the first output stream running unreferenced.
+            if self._out_stream is not None:
                 return
             cfg = self._store.get().audio
             try:
@@ -176,7 +181,13 @@ class AudioPipeline:
     # -- internals -----------------------------------------------------
 
     def _open(self, cfg) -> None:
-        if cfg.input_device:
+        # Read once at open time. A change to it restarts the chain, so the
+        # callbacks never have to reach for the settings store.
+        self._paused = cfg.paused
+
+        if cfg.paused:
+            in_idx, in_dev = None, None
+        elif cfg.input_device:
             in_idx, in_dev = find_device(cfg.input_device, "input")
         else:
             in_idx = sd.default.device[0]
@@ -197,20 +208,25 @@ class AudioPipeline:
             device=out_idx,
             callback=self._on_output,
         )
-        self._in_stream = sd.InputStream(
-            samplerate=rate,
-            blocksize=cfg.blocksize,
-            channels=1,
-            dtype="float32",
-            device=in_idx,
-            callback=self._on_input,
-        )
+        # Paused means the microphone is never opened, which is the whole
+        # point: nothing is holding it and the indicator goes out.
+        if not cfg.paused:
+            self._in_stream = sd.InputStream(
+                samplerate=rate,
+                blocksize=cfg.blocksize,
+                channels=1,
+                dtype="float32",
+                device=in_idx,
+                callback=self._on_input,
+            )
         self._out_stream.start()
-        self._in_stream.start()
+        if self._in_stream is not None:
+            self._in_stream.start()
 
         self._set(
             running=True,
-            input=f"[{in_idx}] {in_dev['name'].strip()}",
+            paused=cfg.paused,
+            input="paused" if cfg.paused else f"[{in_idx}] {in_dev['name'].strip()}",
             output=f"[{out_idx}] {out_dev['name'].strip()}",
             samplerate=rate,
             error=None,
@@ -371,6 +387,12 @@ class AudioPipeline:
     def _on_output(self, outdata, frames, time_info, status) -> None:
         if status:
             log.debug("output status: %s", status)
+        if self._paused:
+            # Nothing is feeding the queue, and an empty queue is normally a
+            # fault worth counting. Here it is the requested state.
+            outdata.fill(0.0)
+            self._set(level_out=0.0)
+            return
         try:
             block = self._queue.get_nowait()
         except queue.Empty:
