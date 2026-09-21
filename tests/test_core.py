@@ -17,6 +17,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src import audio  # noqa: E402
 from src.audiofx import AudioDegrader, JitterBuffer  # noqa: E402
 from src.config import LinkSettings, Settings, SettingsStore  # noqa: E402
 from src.looper import Looper, State  # noqa: E402
@@ -619,6 +620,94 @@ def test_jitter_buffer_delays_by_the_requested_depth():
     out = [buf.push_pop(b, 3) for b in blocks]
     assert float(out[0][0]) == 0.0, "the first pops are the padding the buffer filled with"
     assert float(out[-1][0]) == 6.0, "a depth of 3 must lag the input by 3 blocks"
+
+
+# -- cable resolution ---------------------------------------------------
+
+
+class FakeDevices:
+    """Stands in for the sounddevice module. Lists devices, opens nothing."""
+
+    def __init__(self, devices: list[dict], apis: list[str]) -> None:
+        self._devices = devices
+        self._apis = [{"name": name} for name in apis]
+
+    def query_devices(self) -> list[dict]:
+        return self._devices
+
+    def query_hostapis(self) -> list[dict]:
+        return self._apis
+
+
+def playback(name: str, channels: int = 16, api: int = 0) -> dict:
+    return {"name": name, "hostapi": api,
+            "max_input_channels": 0, "max_output_channels": channels}
+
+
+def capture(name: str, channels: int = 16, api: int = 0) -> dict:
+    return {"name": name, "hostapi": api,
+            "max_input_channels": channels, "max_output_channels": 0}
+
+
+def with_devices(devices: list[dict], apis: list[str] | None = None):
+    """Swap the module's sounddevice handle for the duration of one call."""
+    fake = FakeDevices(devices, apis or ["MME"])
+    real, audio.sd = audio.sd, fake
+    return real
+
+
+def test_cable_order_tries_the_explicit_name_first_and_never_twice():
+    order = audio.cable_output_order("CABLE In 16 Ch")
+    assert order[0] == "CABLE In 16 Ch"
+    assert len(order) == len(set(order)), "a name given explicitly must not repeat later"
+    assert order[-1] == audio.CABLE_ADAPTER, "the adapter sweep is the last resort"
+    assert audio.cable_output_order()[0] == "CABLE Input", "documented name leads by default"
+
+
+def test_cable_output_falls_through_when_the_documented_name_is_gone():
+    # The 2026-09-21 fault: the instance owning `CABLE Input` failed to start,
+    # so only the second instance's endpoints were left listed.
+    real = with_devices([
+        playback("Speakers (Realtek(R) Audio)", channels=2),
+        capture("CABLE Output (2- VB-Audio Virtu"),
+        playback("CABLE In 16 Ch (2- VB-Audio Vir"),
+    ])
+    try:
+        index, device = audio.find_cable_output("CABLE Input")
+    finally:
+        audio.sd = real
+    assert index == 2, f"must land on the live playback endpoint, got [{index}]"
+    assert "CABLE In 16 Ch" in device["name"]
+
+
+def test_cable_output_sweeps_the_adapter_when_every_known_name_is_gone():
+    real = with_devices([
+        playback("Speakers (Realtek(R) Audio)", channels=2),
+        capture("CABLE Output (2- VB-Audio Virtu"),
+        playback("Altoparlanti (2- VB-Audio Virtu"),
+    ])
+    try:
+        index, _ = audio.find_cable_output()
+    finally:
+        audio.sd = real
+    assert index == 2, "a renamed endpoint is still reachable through the adapter name"
+
+
+def test_cable_output_refuses_the_capture_side():
+    # Writing into CABLE Output is the fault this guards: it carries one 16-bit
+    # LSB of dither and reads as a working chain that nobody can hear.
+    real = with_devices([
+        playback("Speakers (Realtek(R) Audio)", channels=2),
+        capture("CABLE Output (2- VB-Audio Virtu"),
+    ])
+    try:
+        audio.find_cable_output()
+    except RuntimeError as exc:
+        assert "no VB-CABLE playback device" in str(exc)
+    else:
+        raise AssertionError("a capture-only cable must not resolve as an output")
+    finally:
+        audio.sd = real
 
 
 # -- looper -------------------------------------------------------------

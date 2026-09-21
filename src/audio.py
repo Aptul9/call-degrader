@@ -2,7 +2,8 @@
 
 The call application never sees the real microphone. It is pointed at
 `CABLE Output`, and this process is what writes into `CABLE Input` at the other
-end of that cable.
+end of that cable, or into whatever that endpoint is called today: see
+`CABLE_OUTPUT_NAMES`.
 
 Input and output are two different devices with two different clocks, so they
 get two streams and a queue between them rather than one duplex stream. The
@@ -61,6 +62,30 @@ API_ORDER = {
 # Reading the far end of VB-CABLE: MME delivers silence, WASAPI will not open.
 CABLE_CAPTURE_APIS = ("DirectSound", "MME", "WASAPI", "WDM-KS")
 
+# Playback endpoint names VB-CABLE has been seen presenting on this machine,
+# in the order they get tried. `CABLE Input` is the documented one, the one the
+# README names and the one every routing guide tells people to pick, so it
+# stays first.
+#
+# The rest are there because an endpoint name is not a property of the driver,
+# it is a property of the device instance. The VB-CABLE installer was run twice
+# on 2026-09-13 and left two root-enumerated instances of the same 3.3.1.7
+# driver. After the unclean shutdown of 2026-09-21 06:41 only one of them came
+# back: the other went to Code 10 CM_PROB_FAILED_START and took `CABLE Input`
+# and `CABLE In 16ch` with it, both to DeviceState 4, where PortAudio stops
+# listing them. The survivor was presenting `CABLE In 16 Ch` and a generic
+# localised `Altoparlanti`, and a 440 Hz tone written into either of those came
+# back off `CABLE Output` at peak 0.5002, so falling through to them is
+# measured rather than hoped for.
+CABLE_OUTPUT_NAMES = ("CABLE Input", "CABLE In 16 Ch", "CABLE In 16ch")
+
+# Last resort, and the reason the generic name above is not in the list: the
+# adapter name sits on every endpoint the driver owns however the endpoint
+# itself ended up called, so this catches a rename nothing here has seen. MME
+# leads API_ORDER, which keeps it off the WDM-KS `VB-Audio Point` views of the
+# same cable.
+CABLE_ADAPTER = "VB-Audio"
+
 
 def find_device(match: str, kind: str, apis: tuple[str, ...] | None = None) -> tuple[int, dict]:
     """Index of the device whose name contains `match`.
@@ -88,6 +113,46 @@ def find_device(match: str, kind: str, apis: tuple[str, ...] | None = None) -> t
 
     hits.sort(key=rank)
     return hits[0]
+
+
+def cable_output_order(match: str | None = None) -> list[str]:
+    """Name fragments tried, in order, when looking for the playback side."""
+    order = [match] if match else []
+    order += [n for n in CABLE_OUTPUT_NAMES if n != match]
+    if CABLE_ADAPTER != match:
+        order.append(CABLE_ADAPTER)
+    return order
+
+
+def find_cable_output(match: str | None = None) -> tuple[int, dict]:
+    """Playback device the degraded audio gets written into.
+
+    `match` is tried first and wins outright when it hits, so an explicit
+    `--cable` still decides. What follows is for a machine whose VB-CABLE
+    endpoints are no longer called what they were called yesterday: writing
+    into the cable under a different endpoint name beats not writing at all.
+
+    Quiet on purpose. Preflight calls this on every `/api/state`, so a warning
+    here is a warning per poll for the length of a call. `_open` says it once
+    instead, where it happens once per chain start.
+    """
+    missed: list[str] = []
+    for fragment in cable_output_order(match):
+        try:
+            index, device = find_device(fragment, "output")
+        except RuntimeError:
+            missed.append(fragment)
+            continue
+        if missed:
+            log.debug(
+                "no playback device matches %s, writing into [%s] %s instead",
+                ", ".join(repr(m) for m in missed), index, device["name"].strip(),
+            )
+        return index, device
+    raise RuntimeError(
+        "no VB-CABLE playback device, nothing matches "
+        + ", ".join(repr(m) for m in missed)
+    )
 
 
 def list_devices() -> dict:
@@ -192,7 +257,12 @@ class AudioPipeline:
         else:
             in_idx = sd.default.device[0]
             in_dev = sd.query_devices(in_idx)
-        out_idx, out_dev = find_device(cfg.output_device, "output")
+        out_idx, out_dev = find_cable_output(cfg.output_device)
+        if cfg.output_device.lower() not in out_dev["name"].lower():
+            log.warning(
+                "no playback device matches %r, writing into [%s] %s instead",
+                cfg.output_device, out_idx, out_dev["name"].strip(),
+            )
 
         rate = cfg.samplerate
         self._degrader = AudioDegrader(samplerate=rate)

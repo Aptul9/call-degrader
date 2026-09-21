@@ -84,6 +84,9 @@ class VideoSettings:
 class AudioSettings:
     enabled: bool = True
     input_device: str | None = None
+    # Preference, not a requirement. `find_cable_output` tries this first and
+    # falls through to the other VB-CABLE playback endpoint names when the
+    # machine is not presenting this one.
     output_device: str = "CABLE Input"
     samplerate: int = 48000
     blocksize: int = 480  # 10 ms at 48 kHz

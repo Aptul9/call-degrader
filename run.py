@@ -97,7 +97,8 @@ def main() -> int:
     parser.add_argument("--size", default="1280x720")
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--mic", default=None, help="input device name fragment")
-    parser.add_argument("--cable", default="CABLE Input", help="output device name fragment")
+    parser.add_argument("--cable", default="CABLE Input",
+                        help="output device name fragment, tried before the VB-CABLE fallbacks")
     parser.add_argument("--pattern", action="store_true",
                         help="use a generated test pattern instead of the camera")
     parser.add_argument("--no-audio", action="store_true")

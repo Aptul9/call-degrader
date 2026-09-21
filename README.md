@@ -33,7 +33,7 @@ python -m venv .venv
 | | why | notes |
 |---|---|---|
 | Windows 11, Python 3.11+ | | tested on Python 3.14.6 |
-| [VB-CABLE](https://vb-audio.com/Cable/) | the virtual microphone | run the installer as administrator, then reboot |
+| [VB-CABLE](https://vb-audio.com/Cable/) | the virtual microphone | run the installer as administrator, then reboot. Once, not twice: see the traps |
 | OBS Studio | the virtual camera | never opened; only its DirectShow filter is used |
 
 ### The virtual camera
@@ -101,7 +101,7 @@ In the call application, pick **OBS Virtual Camera** as the camera and **CABLE O
 | `--size` | `1280x720` | |
 | `--fps` | `30` | |
 | `--mic` | system default | input device, matched on part of its name |
-| `--cable` | `CABLE Input` | output device, matched on part of its name |
+| `--cable` | `CABLE Input` | output device, matched on part of its name. Tried first; if no device carries that name the other VB-CABLE playback endpoints are tried in turn |
 | `--pattern` | | a generated test pattern instead of the camera |
 | `--no-audio`, `--no-video` | | run one chain only |
 | `--window`, `--no-window` | window when built, tab from source | override which one you get |
@@ -208,6 +208,10 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 **The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll`, and `current` is a scoop junction, so an OBS update keeps working and `scoop uninstall obs-studio` leaves the CLSID registered against a file that is gone: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair was found absent on the development machine after having been set earlier, and Teams went on listing both devices anyway, so current builds do not depend on it. The preflight reports all three on every start, the Teams one quietly as a note.
 
 **VB-CABLE device variants are not interchangeable, and the channel count is not what decides it.** Measured by writing a 440 Hz tone into each variant and reading it back: `CABLE Input` on MME carries; `CABLE Output` on MME returns one 16-bit LSB of dither; `CABLE Output` on WASAPI will not open (`PaErrorCode -9999`); several other pairings segfault PortAudio. The working playback device is the 16-channel MME one. The order used is in `src/audio.py`.
+
+**Run the VB-CABLE installer once. Twice leaves two device instances, and a reboot can kill the wrong one.** An endpoint name belongs to a device instance, not to the driver. The installer was run twice on the development machine and left `ROOT\MEDIA\0000` and `ROOT\MEDIA\0001`, both the same 3.3.1.7 driver, created a second apart. After an unclean shutdown only 0001 came back: 0000 went to Code 10 `CM_PROB_FAILED_START` and took its endpoints `CABLE Input` and `CABLE In 16ch` with it, both to `DeviceState 4`, where PortAudio stops listing them. The survivor was presenting `CABLE In 16 Ch` and a generic localised name, and a tone written into either arrived at `CABLE Output` at peak 0.5002. So the cable worked and the app refused to start, because it matched one literal name. `src/audio.py` now falls through `CABLE_OUTPUT_NAMES` and then sweeps on the adapter name, and the preflight reports which endpoint it settled on rather than claiming the driver is missing. Diagnose a repeat with `Get-PnpDevice -InstanceId "ROOT\MEDIA\*"` for the problem code, and `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\*` reading `Properties\{a45c254e-df1c-4efd-8020-67d146a850e0},2` against `DeviceState`.
+
+**A finding that names its own fix can name the wrong one.** The preflight used to turn "no device matches `cable input`" into "install VB-CABLE, run as administrator, then reboot". On the machine above that advice was both wrong and harmful: the driver was installed and working, and a second install is what produced the duplicate instance in the first place. A check reports what it observed; only a check that established the cause may prescribe the cure.
 
 **`sd.play` and `sd.rec` share one module-global stream.** Called from two threads, the second tears down the first one's stream while its callback is still running, and it segfaults rather than raising. Anything that plays and records at once needs explicit `OutputStream` and `InputStream` objects.
 

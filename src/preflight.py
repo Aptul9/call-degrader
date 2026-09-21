@@ -115,24 +115,53 @@ def _cable() -> list[Finding]:
         return [Finding("blocker", f"no audio devices could be listed: {exc}",
                         "check that the Windows audio service is running")]
 
+    from .audio import CABLE_ADAPTER, CABLE_OUTPUT_NAMES, find_cable_output
+
     names = [d["name"].lower() for d in devices]
-    fix = ("install VB-CABLE from https://vb-audio.com/Cable/ , run the installer as "
-           "administrator, then reboot")
+    install = ("install VB-CABLE from https://vb-audio.com/Cable/ , run the installer as "
+               "administrator, then reboot")
+    # Running that installer a second time is not free, so a machine that
+    # already carries the driver gets told something else. Two runs leave two
+    # root-enumerated instances, and after a reboot only one of them starts:
+    # the other keeps its endpoint names, goes DeviceState 4 and takes those
+    # names out of every picker while the driver is plainly still installed.
+    # That is what produced the 2026-09-21 fault, and telling someone to
+    # reinstall is what produced the duplicate in the first place.
+    duplicate = (r'look for a second VB-Audio Virtual Cable in error: Get-PnpDevice '
+                 r'-InstanceId "ROOT\MEDIA\*" . One in Code 10 is the cause; remove the '
+                 "driver with its own installer, reboot, install once, reboot")
+    present = any(CABLE_ADAPTER.lower() in n for n in names)
 
     out = []
-    # What this process writes into.
-    if not any("cable input" in n for n in names):
+    # What this process writes into, asked through the resolver the audio chain
+    # itself uses, so the banner cannot disagree with what actually opens.
+    try:
+        index, device = find_cable_output()
+    except RuntimeError:
         out.append(Finding(
             "blocker",
-            "no CABLE Input: there is nowhere to write the degraded audio, so the call hears nothing",
-            fix,
+            "no VB-CABLE playback device: there is nowhere to write the degraded audio, "
+            "so the call hears nothing",
+            duplicate if present else install,
         ))
-    # What the call application is told to listen to.
+    else:
+        wanted = CABLE_OUTPUT_NAMES[0]
+        if wanted.lower() not in device["name"].lower():
+            out.append(Finding(
+                "note",
+                f"no {wanted} among the playback devices, so the audio goes into "
+                f"[{index}] {device['name'].strip()} instead. Same cable and it carries; a "
+                "VB-CABLE instance that failed to start is what usually takes the name away",
+                duplicate,
+            ))
+    # What the call application is told to listen to. No fallback here: this is
+    # the name a person has to find in a picker, so a different one is not a
+    # detail the app can absorb on their behalf.
     if not any("cable output" in n for n in names):
         out.append(Finding(
             "blocker",
             "no CABLE Output: the call application has no virtual microphone to select",
-            fix,
+            duplicate if present else install,
         ))
     return out
 
