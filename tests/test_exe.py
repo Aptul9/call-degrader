@@ -12,9 +12,9 @@ server that answers on `/` and 404s on the stylesheet, or an audio chain that
 never opens because the PortAudio DLL was left behind. Neither shows up until
 someone tries to take a call with it.
 
-Cold start is measured because it is the number that decides one file against
-one folder, and the answer is not obvious: the single file unpacks itself
-every launch and gets no faster on the second run.
+Cold start is measured because a bundle that answers slowly enough looks dead
+to whoever double-clicked it, and because a sudden jump in it is the first
+sign the bundle grew something it does not need.
 """
 
 from __future__ import annotations
@@ -30,11 +30,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TARGETS = [
     ("one folder", ROOT / "dist" / "call-degrader" / "call-degrader.exe", 8741),
-    ("one file", ROOT / "dist" / "call-degrader-portable.exe", 8742),
 ]
 
-# Generous: the single file unpacks 66 MB before it runs a line of Python, and
-# a cold machine under load is slower than this one.
+# Generous: a cold machine under load is a lot slower than this one.
 BOOT_TIMEOUT = 120.0
 
 
@@ -70,11 +68,10 @@ def _boot(exe: Path, port: int):
 def _kill_tree(proc: subprocess.Popen) -> None:
     """Kill the whole tree, not the process that was launched.
 
-    A onefile bundle is a bootloader: it unpacks itself and runs the real
-    application as a child. `terminate()` kills the bootloader and the child
-    keeps the port, the camera and the virtual camera. Three of them were left
-    running that way, and the next test then measured a 0.01 s boot because it
-    had connected to the previous one.
+    A windowed build owns WebView2 children, and `terminate()` on the parent
+    leaves them holding the port, the camera and the virtual camera. Three were
+    left running that way once, and the next test then measured a 0.01 s boot
+    because it had connected to the previous one.
     """
     if proc.poll() is None:
         subprocess.run(

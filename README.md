@@ -154,18 +154,11 @@ Every effect also has its own weight, and a weight of zero turns it off.
 .venv/Scripts/python.exe -m PyInstaller --noconfirm --clean call-degrader.spec
 ```
 
-One spec, two targets. **Use the folder unless one file on disk is worth more to you than the difference below.**
+One target, `dist/call-degrader/`: 181.8 MB, one process, first HTTP 200 after 1.82 s.
 
-| | size | processes | first HTTP 200 |
-|---|---|---|---|
-| `dist/call-degrader/` | 181.8 MB | 1 | 1.82 s |
-| `dist/call-degrader-portable.exe` | 75.4 MB | 2 | 4.13 s |
+A single-file target existed until 0.1.1 and was dropped. PyInstaller onefile is a bootloader that unpacks the bundle to a temp directory and runs the real application as a child, so ending the visible task leaves the child serving, still holding the camera and the cable, with nothing on screen to say so. Measured: two processes, kill the parent, the survivor still answered HTTP 200. It also cost 4.13 s to first response against 1.82 s, and never improved, because it re-extracts every launch.
 
-The process count is what matters, not the seconds. The single file is a bootloader: it unpacks the whole bundle to a temp directory and runs the real application as a child. End the visible task and the child carries on, still serving, still holding the camera and the cable, with nothing on screen to say so. Measured: two processes, kill the parent, the survivor still answered HTTP 200.
-
-Being a bootloader also costs the start time, and it never improves: 4.10 s cold against 4.08 s on the second run, because it re-extracts every launch.
-
-There is no console window. Closing the window stops the app, and the preflight report reaches the UI as a banner. Everything that would have gone to a terminal is appended to:
+There is no console window. Closing it hides the window and leaves the chains running, as above, and the preflight report reaches the UI as a banner. Everything that would have gone to a terminal is appended to:
 
 ```
 %LOCALAPPDATA%\call-degrader\call-degrader.log
@@ -173,7 +166,7 @@ There is no console window. Closing the window stops the app, and the preflight 
 
 That file is the only thing a failed start leaves behind, so it is the first place to look if the icon appears in the taskbar and no window ever does. Each run writes a banner with its pid, because one file holds many runs.
 
-Neither build removes VB-CABLE or the OBS registration. Those are installed separately whatever the exe looks like.
+The build does not remove VB-CABLE or the OBS registration. Those are installed separately whatever the exe looks like.
 
 `assets/make_icon.py` draws the icon and writes `assets/icon.ico`. `assets/icon.svg` beside it is the reference drawing; the two are kept in step by hand. Run it after changing either.
 
@@ -203,7 +196,7 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 
 **The window icon must be a `.ico`, and a `.png` does not fail, it kills the process.** pywebview hands it to `System.Drawing.Icon`, which reads ICO only, on a .NET dispatcher thread. The `ArgumentException` never becomes a Python exception: the process exits with `0xE0434352`, no window, no traceback, nothing in the log past the audio chain. Every headless check passed on that build, because they all run `--no-window`. `tests/test_exe.py` now starts one windowed and waits past the eight seconds it took to die.
 
-**A onefile bundle is a bootloader, so killing it kills the wrong process.** It unpacks itself and runs the real application as a child, and Task Manager shows two entries with the same name. End the visible one and the survivor keeps serving, keeps the port and keeps the camera and the cable, with nothing on screen: measured, the orphan still answered HTTP 200. The same thing bit the test harness, where `terminate()` left three behind and the next run reported a 0.01 s cold start because it had connected to the previous one. Kill the tree, `taskkill /F /T /PID`. The folder build is a single process and has none of this.
+**Stop a bundle by killing the tree, not the process that was launched.** `terminate()` on the launched process once left three survivors holding the port, the camera and the virtual camera, and the next test then reported a 0.01 s cold start because it had connected to one of them. `taskkill /F /T /PID`. This is why the onefile target was dropped in 0.1.1: its bootloader made every stop this fragile.
 
 **The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll`, and `current` is a scoop junction, so an OBS update keeps working and `scoop uninstall obs-studio` leaves the CLSID registered against a file that is gone: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair was found absent on the development machine after having been set earlier, and Teams went on listing both devices anyway, so current builds do not depend on it. The preflight reports all three on every start, the Teams one quietly as a note.
 

@@ -1,10 +1,10 @@
-# PyInstaller build. Two targets from one analysis:
+# PyInstaller build:
 #
 #     pyinstaller call-degrader.spec
 #
-# produces dist/call-degrader/ (a folder, starts fast) and
-# dist/call-degrader.exe (one file, unpacks itself to a temp directory on
-# every launch, so it starts slower the heavier the bundle is).
+# produces dist/call-degrader/, a folder and a single process. A onefile
+# target sat beside it until 0.1.1; its bootloader ran the real application as
+# a child, so stopping the visible process left the app serving.
 #
 # No console. The window is what the app is now, closing it is what stops it,
 # and the preflight report reaches the UI as a banner. Nothing is lost by
@@ -71,19 +71,4 @@ COLLECT(
     strip=False,
     upx=False,
     name="call-degrader",
-)
-
-# -- single file -------------------------------------------------------
-
-exe_one = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name="call-degrader-portable",
-    console=False,
-    disable_windowed_traceback=False,
-    icon="assets/icon.ico",
-    upx=False,
 )
