@@ -8,8 +8,12 @@
 // Always visible. Section, field, label.
 const QUICK_CHECKS = [
   ['link',  'enabled',      'bad line on'],
+  // The one part of a bad line that a call cannot absorb. Off leaves the
+  // stalls and the artefacts and stops the far end answering a second late.
+  ['link',  'add_delay',    'delay too'],
   ['video', 'keep_colours', 'keep colours'],
-  ['video', 'mirror',       'mirror camera'],
+  ['video', 'mirror',       'mirror my preview'],
+  ['video', 'mirror_output', 'mirror what the call sees'],
   ['pedal', 'ghost',        'ghost me under the loop'],
   ['pedal', 'mute_on_loop', 'mute mic while looping'],
   ['pedal', 'enabled',      'hotkeys on'],
@@ -923,7 +927,10 @@ function paint(status) {
   setPill('pill-vcam', vcam ? short(vcam) : 'no virtual camera', vcam ? 'ok' : 'warn');
 
   const audio = status.audio || {};
-  setPill('pill-audio', audio.running ? `audio ${audio.samplerate} Hz` : 'audio off',
+  // What the two drivers negotiated, so the floor under every delay is on
+  // screen rather than guessed at when the far end says there is a lag.
+  const lag = audio.latency_ms == null ? '' : `, ${Math.round(audio.latency_ms)} ms`;
+  setPill('pill-audio', audio.running ? `audio ${audio.samplerate} Hz${lag}` : 'audio off',
           audio.running ? 'ok' : 'warn');
   $('meter-in').style.width = `${Math.min(100, (audio.level_in || 0) * 320)}%`;
   $('meter-out').style.width = `${Math.min(100, (audio.level_out || 0) * 320)}%`;

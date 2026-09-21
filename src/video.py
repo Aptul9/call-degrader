@@ -128,6 +128,8 @@ class VideoPipeline:
 
         # Mirroring is for a lens pointed at you. A generated frame has no
         # handedness, so flipping one only reverses the text written on it.
+        # Both flips skip it: the preview one below as well as the outgoing
+        # one in the loop.
         generated = backend in ("paused", "pattern")
 
         period = 1.0 / max(1, cfg.fps)
@@ -143,7 +145,11 @@ class VideoPipeline:
                 if not ok or frame is None:
                     time.sleep(0.01)
                     continue
-                if cfg.mirror and not generated:
+                # The call gets the frame the way the lens saw it. The
+                # preview is mirrored on its own further down, which is the
+                # split every call application makes: you watch a reflection,
+                # the far end watches you.
+                if cfg.mirror_output and not generated:
                     frame = cv2.flip(frame, 1)
 
                 snap = self._link.get()
@@ -159,7 +165,7 @@ class VideoPipeline:
                         cam = None
                         self._set_status(virtual_camera=None, error=f"virtual camera lost: {exc}")
 
-                self._publish_preview(out, settings)
+                self._publish_preview(out, settings, generated)
 
                 ticks += 1
                 now = time.monotonic()
@@ -197,10 +203,13 @@ class VideoPipeline:
             return self._delay.popleft()
         return self._delay[0]
 
-    def _publish_preview(self, out: np.ndarray, settings) -> None:
+    def _publish_preview(self, out: np.ndarray, settings, generated: bool) -> None:
         shown = out
         if self.looper.state is State.LOOP and settings.pedal.ghost:
             shown = self.looper.preview(out, settings.pedal.overlay)
+        # Before the annotation, or the status line comes out back to front.
+        if settings.video.mirror and not generated:
+            shown = cv2.flip(shown, 1)
         shown = _annotate(shown, self.looper.state, self._link.get())
         ok, buf = cv2.imencode(".jpg", shown, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         if not ok:

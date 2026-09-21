@@ -50,12 +50,26 @@ log = logging.getLogger(__name__)
 # device is the one that works, and the 2-channel WASAPI one is not. WDM-KS is
 # last everywhere, which matches what ever-spammer/calls/bridge.py found.
 #
-# Input stays MME-first because that is what was proven for real capture
-# devices, Stereo Mix included. Reading back from CABLE Output is the one case
-# that needs DirectSound, and only the cable test does that; it passes its own
-# order rather than skewing the default for every microphone.
+# Output leads with WASAPI since 2026-09-21, which reverses part of the table
+# above. That table measured whether a tone survived the cable, and it does on
+# both; what it never measured was the delay. Writing into `CABLE Input`
+# negotiates 22 ms on WASAPI against 180 ms on MME, and those 158 ms sat under
+# every call the tool has been used on.
+#
+# The segfault recorded above did not reproduce: a WASAPI stream into `CABLE
+# Input` while a separate process read `CABLE Output` on DirectSound came back
+# at peak 0.3001 of a 0.3 tone, the whole signal and no crash. It is still a
+# walk rather than a swap, because `_start_stream` falls through to the next
+# host API view of the same endpoint when one will not start.
+#
+# Input stays MME-first: it is what was proven for real capture devices,
+# Stereo Mix included, and there is nothing to win. The same microphone
+# measures 20 ms on MME against 22 ms on WASAPI, and opening the wrong device
+# costs more than 2 ms is worth. Reading back from CABLE Output is the one
+# case that needs DirectSound, and only the cable test does that; it passes
+# its own order rather than skewing the default for every microphone.
 API_ORDER = {
-    "output": ("MME", "DirectSound", "WASAPI", "WDM-KS"),
+    "output": ("WASAPI", "MME", "DirectSound", "WDM-KS"),
     "input": ("MME", "DirectSound", "WASAPI", "WDM-KS"),
 }
 
@@ -87,11 +101,16 @@ CABLE_OUTPUT_NAMES = ("CABLE Input", "CABLE In 16 Ch", "CABLE In 16ch")
 CABLE_ADAPTER = "VB-Audio"
 
 
-def find_device(match: str, kind: str, apis: tuple[str, ...] | None = None) -> tuple[int, dict]:
-    """Index of the device whose name contains `match`.
+def find_devices(match: str, kind: str, apis: tuple[str, ...] | None = None) -> list[tuple[int, dict]]:
+    """Every device whose name contains `match`, best host API first.
 
     Ties break on the host API order above, then on the smallest channel count.
     Pass `apis` to force a different order for a device that needs it.
+
+    The whole ranking rather than the winner, because a device that resolves
+    is not a device that opens: one host API view of an endpoint can refuse
+    where the next one works, and only having the rest of the list makes that
+    recoverable.
     """
     key = "max_input_channels" if kind == "input" else "max_output_channels"
     order = apis or API_ORDER[kind]
@@ -112,7 +131,12 @@ def find_device(match: str, kind: str, apis: tuple[str, ...] | None = None) -> t
         return position, hit[1][key]
 
     hits.sort(key=rank)
-    return hits[0]
+    return hits
+
+
+def find_device(match: str, kind: str, apis: tuple[str, ...] | None = None) -> tuple[int, dict]:
+    """Index of the device whose name contains `match`."""
+    return find_devices(match, kind, apis)[0]
 
 
 def cable_output_order(match: str | None = None) -> list[str]:
@@ -136,23 +160,42 @@ def find_cable_output(match: str | None = None) -> tuple[int, dict]:
     here is a warning per poll for the length of a call. `_open` says it once
     instead, where it happens once per chain start.
     """
+    return find_cable_outputs(match)[0]
+
+
+def find_cable_outputs(match: str | None = None) -> list[tuple[int, dict]]:
+    """Every playback endpoint the degraded audio could be written into.
+
+    Ordered by name first, so an explicit `--cable` still decides, then by
+    host API within each name. The chain walks this until one starts, which is
+    what lets WASAPI lead without being a requirement: a view that will not
+    open falls through to the MME view of the same endpoint instead of taking
+    the audio down with it.
+    """
+    found: list[tuple[int, dict]] = []
+    seen: set[int] = set()
     missed: list[str] = []
     for fragment in cable_output_order(match):
         try:
-            index, device = find_device(fragment, "output")
+            hits = find_devices(fragment, "output")
         except RuntimeError:
             missed.append(fragment)
             continue
-        if missed:
-            log.debug(
-                "no playback device matches %s, writing into [%s] %s instead",
-                ", ".join(repr(m) for m in missed), index, device["name"].strip(),
-            )
-        return index, device
-    raise RuntimeError(
-        "no VB-CABLE playback device, nothing matches "
-        + ", ".join(repr(m) for m in missed)
-    )
+        for index, device in hits:
+            if index not in seen:
+                seen.add(index)
+                found.append((index, device))
+    if not found:
+        raise RuntimeError(
+            "no VB-CABLE playback device, nothing matches "
+            + ", ".join(repr(m) for m in missed)
+        )
+    if missed:
+        log.debug(
+            "no playback device matches %s, writing into [%s] %s instead",
+            ", ".join(repr(m) for m in missed), found[0][0], found[0][1]["name"].strip(),
+        )
+    return found
 
 
 def list_devices() -> dict:
@@ -185,6 +228,9 @@ class AudioPipeline:
         self._degrader: AudioDegrader | None = None
         self._jitter: JitterBuffer | None = None
         self._queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
+        # Standing depth the handover is allowed to reach. Recomputed at open
+        # against the real blocksize; this is the 480-at-48k answer.
+        self._ceiling = 8
 
         self._paused = False
         self._in_stream: sd.InputStream | None = None
@@ -207,6 +253,7 @@ class AudioPipeline:
             "input": None,
             "output": None,
             "samplerate": None,
+            "latency_ms": None,
             "level_in": 0.0,
             "level_out": 0.0,
             "underruns": 0,
@@ -250,48 +297,49 @@ class AudioPipeline:
         # callbacks never have to reach for the settings store.
         self._paused = cfg.paused
 
-        if cfg.paused:
-            in_idx, in_dev = None, None
-        elif cfg.input_device:
-            in_idx, in_dev = find_device(cfg.input_device, "input")
-        else:
-            in_idx = sd.default.device[0]
-            in_dev = sd.query_devices(in_idx)
-        out_idx, out_dev = find_cable_output(cfg.output_device)
+        rate = cfg.samplerate
+        self._degrader = AudioDegrader(samplerate=rate)
+        self._jitter = JitterBuffer(blocksize=cfg.blocksize)
+        self._ceiling = max(4, int(0.08 * rate / max(1, cfg.blocksize)))
+        with self._queue.mutex:
+            self._queue.queue.clear()
+
+        out_idx, out_dev, self._out_stream = self._start_stream(
+            "output",
+            find_cable_outputs(cfg.output_device),
+            lambda index, device: sd.OutputStream(
+                samplerate=rate,
+                blocksize=cfg.blocksize,
+                channels=min(2, device["max_output_channels"]),
+                dtype="float32",
+                device=index,
+                latency=cfg.latency,
+                callback=self._on_output,
+            ),
+        )
         if cfg.output_device.lower() not in out_dev["name"].lower():
             log.warning(
                 "no playback device matches %r, writing into [%s] %s instead",
                 cfg.output_device, out_idx, out_dev["name"].strip(),
             )
 
-        rate = cfg.samplerate
-        self._degrader = AudioDegrader(samplerate=rate)
-        self._jitter = JitterBuffer(blocksize=cfg.blocksize)
-        with self._queue.mutex:
-            self._queue.queue.clear()
-
-        self._out_stream = sd.OutputStream(
-            samplerate=rate,
-            blocksize=cfg.blocksize,
-            channels=min(2, out_dev["max_output_channels"]),
-            dtype="float32",
-            device=out_idx,
-            callback=self._on_output,
-        )
         # Paused means the microphone is never opened, which is the whole
         # point: nothing is holding it and the indicator goes out.
+        in_idx, in_dev = None, None
         if not cfg.paused:
-            self._in_stream = sd.InputStream(
-                samplerate=rate,
-                blocksize=cfg.blocksize,
-                channels=1,
-                dtype="float32",
-                device=in_idx,
-                callback=self._on_input,
+            in_idx, in_dev, self._in_stream = self._start_stream(
+                "input",
+                self._input_candidates(cfg),
+                lambda index, device: sd.InputStream(
+                    samplerate=rate,
+                    blocksize=cfg.blocksize,
+                    channels=1,
+                    dtype="float32",
+                    device=index,
+                    latency=cfg.latency,
+                    callback=self._on_input,
+                ),
             )
-        self._out_stream.start()
-        if self._in_stream is not None:
-            self._in_stream.start()
 
         self._set(
             running=True,
@@ -299,9 +347,81 @@ class AudioPipeline:
             input="paused" if cfg.paused else f"[{in_idx}] {in_dev['name'].strip()}",
             output=f"[{out_idx}] {out_dev['name'].strip()}",
             samplerate=rate,
+            latency_ms=self._negotiated_ms(),
             error=None,
         )
-        log.info("audio %s -> %s at %s Hz", self._status["input"], self._status["output"], rate)
+        log.info(
+            "audio %s -> %s at %s Hz, %s ms in the drivers",
+            self._status["input"], self._status["output"], rate, self._status["latency_ms"],
+        )
+
+    def _input_candidates(self, cfg) -> list[tuple[int, dict]]:
+        """Microphone views to try, in order.
+
+        A device asked for by name is ranked by host API like anything else.
+        The default one is not: `sd.default.device[0]` is the only handle
+        certain to be the microphone the system means, and another host API
+        view of a similar name can be a different device altogether. It leads,
+        and the views sharing its name follow as fallbacks.
+        """
+        if cfg.input_device:
+            return find_devices(cfg.input_device, "input")
+        index = sd.default.device[0]
+        device = sd.query_devices(index)
+        stem = device["name"].split("(")[0].strip()
+        rest: list[tuple[int, dict]] = []
+        if stem:
+            try:
+                rest = [c for c in find_devices(stem, "input") if c[0] != index]
+            except RuntimeError:
+                rest = []
+        return [(index, device), *rest]
+
+    def _start_stream(self, kind: str, candidates, build):
+        """Open and start the first candidate that will take it.
+
+        A device that resolves is not a device that opens. One host API view
+        of an endpoint can come back -9999 where the next view of the same
+        endpoint runs, and it does it at start rather than at open, so both
+        happen here and a failure moves down the list.
+        """
+        errors: list[str] = []
+        for index, device in candidates:
+            name = device["name"].strip()
+            stream = None
+            try:
+                stream = build(index, device)
+                stream.start()
+            except Exception as exc:
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception as closing:
+                        log.debug("%s [%s] close after a failed start: %s", kind, index, closing)
+                errors.append(f"[{index}] {name}: {exc}")
+                continue
+            if errors:
+                log.warning(
+                    "%s fell through to [%s] %s after %s", kind, index, name, "; ".join(errors)
+                )
+            return index, device, stream
+        raise RuntimeError(
+            f"no {kind} device would start, tried " + ("; ".join(errors) or "nothing")
+        )
+
+    def _negotiated_ms(self) -> float:
+        """What the drivers gave, both directions, in ms.
+
+        Read off the open streams rather than off the hint that was asked for,
+        so it is the buffer that exists. It is the floor under every delay the
+        link adds on top, and the number to look at when the far end says
+        there is a lag.
+        """
+        total = 0.0
+        for stream in (self._in_stream, self._out_stream):
+            if stream is not None:
+                total += float(stream.latency)
+        return round(total * 1000.0, 1)
 
     def _close(self) -> None:
         for stream in (self._in_stream, self._out_stream):
@@ -332,11 +452,21 @@ class AudioPipeline:
         depth = int(extra * settings.audio.samplerate / max(1, settings.audio.blocksize))
         out = self._jitter.push_pop(out, depth)
 
+        # Two devices, two clocks, and the input one can be the faster. The
+        # queue then grows a block at a time and never gives one back, so a
+        # call that started in sync ends a second behind with nothing on
+        # screen saying why. Measured at 2 to 3 blocks over a minute on this
+        # machine, so this is a ceiling rather than a fix for something seen.
+        # The oldest block goes, not the newest: the far end hears a join
+        # either way, and only this way does the delay come back down.
+        while self._queue.qsize() >= self._ceiling:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
         try:
             self._queue.put_nowait(out)
         except queue.Full:
-            # Output side is behind. Dropping the newest block is better than
-            # growing a queue that turns into unbounded latency.
             pass
 
         self._tap(block, out)

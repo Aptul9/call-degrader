@@ -143,8 +143,12 @@ class LinkSimulator:
             severity=1.0 - (quality / 100.0),
             stalled=stalled,
             stall_elapsed=stall_elapsed,
-            latency=max(0.0, cfg.latency),
-            desync=cfg.desync,
+            # Gated here rather than in the two chains, so the video hold,
+            # the audio jitter buffer and the offline render all stop
+            # together. Anything reading the snapshot sees a line that is
+            # still bad and no longer late.
+            latency=max(0.0, cfg.latency) if cfg.add_delay else 0.0,
+            desync=cfg.desync if cfg.add_delay else 0.0,
             enabled=True,
             at=now,
         )

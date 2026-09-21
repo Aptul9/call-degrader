@@ -70,6 +70,26 @@ def test_link_is_inert_while_disabled():
     assert snap.quality == 100.0 and not snap.stalled and snap.severity == 0.0
 
 
+def test_the_delay_switch_leaves_the_rest_of_the_line_alone():
+    """Delay off stops the clock without cleaning the line up.
+
+    A preset carries up to 1.2 s of one-way delay, and on top of the drivers
+    that is the far end answering a second late: a call nobody can hold
+    rather than a call going badly. Off, the stalls and the quality walk have
+    to carry on exactly as they were.
+    """
+    store = SettingsStore()
+    store.apply_preset("train-tunnel")
+    sim = LinkSimulator(store)
+    on = sim._advance(store.get().link, 0.01, 1.0)
+    assert on.latency == 0.7 and on.desync == 0.35
+
+    store.patch({"link": {"add_delay": False}})
+    off = sim._advance(store.get().link, 0.01, 1.01)
+    assert off.latency == 0.0 and off.desync == 0.0
+    assert off.enabled and off.severity > 0.5, "the line is still a bad one"
+
+
 def test_link_stalls_and_wanders_when_enabled():
     store = SettingsStore(Settings(link=LinkSettings(
         enabled=True, quality=50.0, drift=10.0, stall_rate=60.0,
@@ -215,7 +235,8 @@ def test_pausing_restarts_either_chain():
     from src.config import AudioSettings, VideoSettings
 
     video = ("source", "camera", "backend", "paused", "width", "height", "fps")
-    audio = ("input_device", "output_device", "samplerate", "blocksize", "paused")
+    audio = ("input_device", "output_device", "samplerate", "blocksize", "paused",
+             "latency")
     assert _differs(VideoSettings(), VideoSettings(paused=True), video), \
         "pause changes what the video chain opens, so it has to be read at start"
     assert _differs(AudioSettings(), AudioSettings(paused=True), audio), \
@@ -233,9 +254,36 @@ def test_a_paused_card_is_never_mirrored():
     from src import video as video_module
 
     body = inspect.getsource(video_module.VideoPipeline._run)
+    preview = inspect.getsource(video_module.VideoPipeline._publish_preview)
     assert 'generated = backend in ("paused", "pattern")' in body
-    assert "if cfg.mirror and not generated:" in body, \
-        "the flip has to skip sources that draw their own frames"
+    assert "if cfg.mirror_output and not generated:" in body, \
+        "the outgoing flip has to skip sources that draw their own frames"
+    assert "if settings.video.mirror and not generated:" in preview, \
+        "so does the preview one"
+
+
+def test_the_preview_mirror_never_reaches_the_call():
+    """Two settings, because they answer two different questions.
+
+    One flip for both meant the far end was sent a reflection: writing on a
+    page came out backwards and pointing right arrived as pointing left. The
+    preview is the one that has to be a mirror.
+    """
+    import inspect
+
+    from src import video as video_module
+    from src.config import VideoSettings
+
+    assert VideoSettings().mirror, "a self-view nobody asked to flip is disorienting"
+    assert not VideoSettings().mirror_output, "the call gets what the lens saw"
+
+    body = inspect.getsource(video_module.VideoPipeline._run)
+    assert "cfg.mirror and not generated" not in body, \
+        "the outgoing frame must not be flipped by the preview setting"
+
+    preview = inspect.getsource(video_module.VideoPipeline._publish_preview)
+    assert preview.index("cv2.flip") < preview.index("_annotate"), \
+        "flipping after the annotation writes the status line backwards"
 
 
 def test_the_window_icon_is_an_ico_not_a_png():
@@ -622,6 +670,50 @@ def test_jitter_buffer_delays_by_the_requested_depth():
     assert float(out[-1][0]) == 6.0, "a depth of 3 must lag the input by 3 blocks"
 
 
+def test_the_handover_queue_cannot_grow_into_latency():
+    """The faster of two clocks must not turn the queue into delay.
+
+    Nothing ever gave a block back once the queue had grown, so a queue that
+    drifted up stayed up for the rest of the call. It reads as nothing in the
+    UI: the far end simply answers late.
+    """
+
+    class Link:
+        def get(self):
+            return snapshot(enabled=False)
+
+    store = SettingsStore()
+    cfg = store.get().audio
+    pipe = audio.AudioPipeline(store, Link())
+    pipe._degrader = AudioDegrader(samplerate=cfg.samplerate)
+    pipe._jitter = JitterBuffer(blocksize=cfg.blocksize)
+
+    block = np.zeros((cfg.blocksize, 1), dtype=np.float32)
+    for _ in range(200):
+        pipe._on_input(block, cfg.blocksize, None, None)
+
+    standing = pipe._queue.qsize()
+    assert standing <= pipe._ceiling, \
+        f"200 blocks in and none out left {standing} standing, {standing * 10} ms of it"
+
+
+def test_both_streams_ask_for_the_low_latency_buffer():
+    """sounddevice defaults to "high" and nothing used to override it.
+
+    On the MME view of the cable that is 180 ms of playback buffer, one way,
+    under every call. The hint is per stream, so both of them carry it or the
+    saving is half of what it looks like.
+    """
+    import inspect
+
+    from src.config import AudioSettings
+
+    assert AudioSettings().latency == "low"
+    body = inspect.getsource(audio.AudioPipeline._open)
+    assert body.count("latency=cfg.latency") == 2, \
+        "the playback stream and the capture stream both take the hint"
+
+
 # -- cable resolution ---------------------------------------------------
 
 
@@ -691,6 +783,33 @@ def test_cable_output_sweeps_the_adapter_when_every_known_name_is_gone():
     finally:
         audio.sd = real
     assert index == 2, "a renamed endpoint is still reachable through the adapter name"
+
+
+def test_the_cable_leads_with_the_host_api_that_is_not_slow():
+    """WASAPI negotiates 22 ms into the cable where MME negotiates 180.
+
+    Leading, not replacing: the MME view of the same endpoint stays in the
+    list behind it, because a host API that resolves is not a host API that
+    opens and `_start_stream` needs somewhere to fall through to.
+    """
+    assert audio.API_ORDER["output"][0] == "WASAPI"
+    assert audio.API_ORDER["input"][0] == "MME", \
+        "capture stays where it was measured, 20 ms against 22 is nothing to win"
+
+    # The WASAPI view carries more channels here, so only the host API order
+    # can put it first: the tie-break below it would pick the other one.
+    real = with_devices(
+        [
+            playback("CABLE Input (2- VB-Audio Virtua", channels=2, api=0),
+            playback("CABLE Input (2- VB-Audio Virtual Cable)", channels=16, api=1),
+        ],
+        apis=["MME", "Windows WASAPI"],
+    )
+    try:
+        ranked = audio.find_cable_outputs("CABLE Input")
+    finally:
+        audio.sd = real
+    assert [i for i, _ in ranked] == [1, 0], "WASAPI first, MME kept behind it"
 
 
 def test_cable_output_refuses_the_capture_side():

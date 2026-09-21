@@ -105,7 +105,8 @@ class Controller:
             self.audio.start() if after.audio.enabled else self.audio.stop()
         elif after.audio.enabled and _differs(
             before.audio, after.audio,
-            ("input_device", "output_device", "samplerate", "blocksize", "paused"),
+            ("input_device", "output_device", "samplerate", "blocksize", "paused",
+             "latency"),
         ):
             self.audio.restart()
 

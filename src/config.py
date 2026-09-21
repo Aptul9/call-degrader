@@ -35,6 +35,14 @@ class LinkSettings:
     latency: float = 0.0
     # Positive pushes audio behind video, negative pulls it ahead. Seconds.
     desync: float = 0.0
+    # Whether the two delays above are applied at all. Every other part of a
+    # bad line survives being switched off and still reads as the same line;
+    # delay does not. The presets carry 0.15 s to 1.2 s of it, and on top of
+    # the transport the far end is answering a second late, which stops being
+    # a bad connection and starts being a conversation nobody can hold. Off
+    # keeps the stalls, the dropouts and the artefacts and leaves the timing
+    # where it was.
+    add_delay: bool = True
     seed: int = 0
 
 
@@ -62,7 +70,14 @@ class VideoSettings:
     width: int = 1280
     height: int = 720
     fps: int = 30
+    # Mirror the preview. A self-view that is not a mirror is disorienting to
+    # sit in front of, and it is what every call application shows you.
     mirror: bool = True
+    # Mirror what the call is sent, which is a different question and gets a
+    # different answer. The far end is looking at you rather than at your
+    # reflection, so anything with writing on it arrives backwards and you
+    # reach the wrong way when you point at something.
+    mirror_output: bool = False
     # Degrade brightness only and put the original colour back afterwards.
     # A starved codec really does wreck chroma, but the result is a picture
     # whose colours crawl, which looks like a fault in the camera rather than
@@ -90,6 +105,18 @@ class AudioSettings:
     output_device: str = "CABLE Input"
     samplerate: int = 48000
     blocksize: int = 480  # 10 ms at 48 kHz
+    # PortAudio latency hint, passed to both streams. sounddevice leaves this
+    # at "high" and nothing here used to override it, which on the MME view of
+    # the cable negotiated 180 ms on the playback side alone. Measured on this
+    # machine at 48 kHz, in ms:
+    #
+    #   playback  WASAPI  22 / 22 / 22      capture  MME          30 / 20 / 30
+    #             MME    180 / 100 / 180             DirectSound  10 / 10 / 10
+    #             DirectSound 240 / 120 / 240        WASAPI       22 / 22 / 22
+    #
+    # read as default / low / high. A float here is taken as seconds and is a
+    # request rather than a promise.
+    latency: str | float = "low"
     # Release the microphone and write silence to the cable instead. Same
     # bargain as the video pause: the input device is closed so the privacy
     # indicator goes out, and the output stream stays open so a call in
