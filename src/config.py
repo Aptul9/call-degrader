@@ -70,14 +70,13 @@ class VideoSettings:
     width: int = 1280
     height: int = 720
     fps: int = 30
-    # Mirror the preview. A self-view that is not a mirror is disorienting to
-    # sit in front of, and it is what every call application shows you.
+    # Mirrors the preview and nothing else. A self-view that is not a mirror
+    # is disorienting to sit in front of, and it is what every call
+    # application shows you. What goes down the wire is never flipped: the far
+    # end is looking at you rather than at your reflection, so a mirrored feed
+    # arrives with writing backwards and pointing right arriving as pointing
+    # left.
     mirror: bool = True
-    # Mirror what the call is sent, which is a different question and gets a
-    # different answer. The far end is looking at you rather than at your
-    # reflection, so anything with writing on it arrives backwards and you
-    # reach the wrong way when you point at something.
-    mirror_output: bool = False
     # Degrade brightness only and put the original colour back afterwards.
     # A starved codec really does wreck chroma, but the result is a picture
     # whose colours crawl, which looks like a fault in the camera rather than

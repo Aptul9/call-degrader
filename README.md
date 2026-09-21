@@ -115,7 +115,7 @@ Two tabs. **video** has the preview, the pedal and the line presets. **audio** h
 
 **Delay is the one part of a bad line a conversation cannot absorb.** The line presets carry 0.15 s to 1.2 s of one-way delay, and `train-tunnel` adds 0.35 s of audio-behind-video on top of that, which is what makes the rough end of the range impossible to talk over rather than merely rough. **delay too** turns both off and leaves everything else where it was: the stalls, the dropouts and the artefacts all carry on. The **audio** pill reports what the two drivers negotiated, which is the floor the line adds on top of.
 
-**Two mirror settings, because they answer two questions.** **mirror my preview** flips what you see and nothing else. It is on, because a self-view that is not a mirror is unpleasant to sit in front of and every call application shows you one. **mirror what the call sees** flips what goes down the wire, and it is off: the far end is looking at you rather than at your reflection, so with it on, writing held up to the camera arrives backwards and pointing right arrives as pointing left.
+**mirror preview** moves the preview and nothing else. It is on, because a self-view that is not a mirror is unpleasant to sit in front of and every call application shows you one. What goes down the wire is never flipped, whatever that box says: the far end is looking at you rather than at your reflection, so a mirrored feed would arrive with writing backwards and pointing right arriving as pointing left.
 
 ### The pedal
 

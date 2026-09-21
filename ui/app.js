@@ -12,8 +12,7 @@ const QUICK_CHECKS = [
   // stalls and the artefacts and stops the far end answering a second late.
   ['link',  'add_delay',    'delay too'],
   ['video', 'keep_colours', 'keep colours'],
-  ['video', 'mirror',       'mirror my preview'],
-  ['video', 'mirror_output', 'mirror what the call sees'],
+  ['video', 'mirror',       'mirror preview'],
   ['pedal', 'ghost',        'ghost me under the loop'],
   ['pedal', 'mute_on_loop', 'mute mic while looping'],
   ['pedal', 'enabled',      'hotkeys on'],

@@ -256,18 +256,16 @@ def test_a_paused_card_is_never_mirrored():
     body = inspect.getsource(video_module.VideoPipeline._run)
     preview = inspect.getsource(video_module.VideoPipeline._publish_preview)
     assert 'generated = backend in ("paused", "pattern")' in body
-    assert "if cfg.mirror_output and not generated:" in body, \
-        "the outgoing flip has to skip sources that draw their own frames"
     assert "if settings.video.mirror and not generated:" in preview, \
-        "so does the preview one"
+        "the flip has to skip sources that draw their own frames"
 
 
-def test_the_preview_mirror_never_reaches_the_call():
-    """Two settings, because they answer two different questions.
+def test_the_mirror_never_reaches_the_call():
+    """One setting, and it moves the preview only.
 
-    One flip for both meant the far end was sent a reflection: writing on a
-    page came out backwards and pointing right arrived as pointing left. The
-    preview is the one that has to be a mirror.
+    The same flag used to flip the frame before it reached the virtual
+    camera, so the far end was sent a reflection: writing on a page came out
+    backwards and pointing right arrived as pointing left.
     """
     import inspect
 
@@ -275,11 +273,9 @@ def test_the_preview_mirror_never_reaches_the_call():
     from src.config import VideoSettings
 
     assert VideoSettings().mirror, "a self-view nobody asked to flip is disorienting"
-    assert not VideoSettings().mirror_output, "the call gets what the lens saw"
 
     body = inspect.getsource(video_module.VideoPipeline._run)
-    assert "cfg.mirror and not generated" not in body, \
-        "the outgoing frame must not be flipped by the preview setting"
+    assert "cv2.flip" not in body, "nothing on the way to the call may flip the frame"
 
     preview = inspect.getsource(video_module.VideoPipeline._publish_preview)
     assert preview.index("cv2.flip") < preview.index("_annotate"), \

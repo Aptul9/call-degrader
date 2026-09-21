@@ -127,9 +127,8 @@ class VideoPipeline:
         )
 
         # Mirroring is for a lens pointed at you. A generated frame has no
-        # handedness, so flipping one only reverses the text written on it.
-        # Both flips skip it: the preview one below as well as the outgoing
-        # one in the loop.
+        # handedness, so flipping one only reverses the text written on it,
+        # and the preview flip further down skips it.
         generated = backend in ("paused", "pattern")
 
         period = 1.0 / max(1, cfg.fps)
@@ -145,13 +144,6 @@ class VideoPipeline:
                 if not ok or frame is None:
                     time.sleep(0.01)
                     continue
-                # The call gets the frame the way the lens saw it. The
-                # preview is mirrored on its own further down, which is the
-                # split every call application makes: you watch a reflection,
-                # the far end watches you.
-                if cfg.mirror_output and not generated:
-                    frame = cv2.flip(frame, 1)
-
                 snap = self._link.get()
                 out = self.looper.process(frame)
                 out = self._degrader.apply(out, snap, cfg)
