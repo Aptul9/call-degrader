@@ -122,7 +122,7 @@ def main() -> int:
     print(f"\nplaying {TONE_HZ:.0f} Hz on device {speaker}, "
           f"recording device {cable_out} ({cable_dev['name'].strip()})\n")
 
-    requests.post(f"{API}/api/preset/perfect", timeout=5).raise_for_status()
+    requests.post(f"{API}/api/preset/original", timeout=5).raise_for_status()
     time.sleep(0.5)
     clean_peak, clean_hz, clean_quiet = measure("clean line", speaker, cable_out)
     if clean_peak < 0.01:
@@ -132,7 +132,7 @@ def main() -> int:
         print("\n  the tone never reached the cable: the speakers are muted, the volume")
         print("  is at zero, or Stereo Mix is disabled.")
         print("\nskipped: nothing measurable until playback is audible")
-        requests.post(f"{API}/api/preset/perfect", timeout=5)
+        requests.post(f"{API}/api/preset/original", timeout=5)
         return 0
 
     # Not a preset. train-tunnel stalls about 14 times a minute, so over a
@@ -148,7 +148,7 @@ def main() -> int:
     time.sleep(0.5)
     bad_peak, _bad_hz, bad_quiet = measure("stalling line", speaker, cable_out)
 
-    requests.post(f"{API}/api/preset/perfect", timeout=5).raise_for_status()
+    requests.post(f"{API}/api/preset/original", timeout=5).raise_for_status()
 
     print()
     checks = [
