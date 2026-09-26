@@ -16,6 +16,7 @@ import logging
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 
 import cv2
 import numpy as np
@@ -25,6 +26,14 @@ from .videofx import VideoDegrader, overlay
 
 log = logging.getLogger(__name__)
 
+# OpenCV splits every call across all eight cores by default and its pool
+# spins between calls, which on 720p frames buys nothing worth the price.
+# Measured on the camera path with nothing else changed: the whole app at
+# 28.1 percent of a core on the default pool, 15.9 on two threads and 14.2 on
+# one. The effects are the calls that do use the extra threads, 6.7 to 9.5 ms
+# a frame on eight, 7.8 to 11.2 on two, 11.6 to 14.0 on one, so two it is.
+cv2.setNumThreads(2)
+
 # Backends worth trying on Windows, in order. MSMF is the modern one and is
 # what most integrated cameras answer on; DSHOW is the fallback for the rest.
 _BACKENDS = [
@@ -32,6 +41,15 @@ _BACKENDS = [
     ("DSHOW", getattr(cv2, "CAP_DSHOW", 0)),
     ("ANY", getattr(cv2, "CAP_ANY", 0)),
 ]
+
+# The preview is a self-view for whoever is at the keyboard, not what the call
+# gets, so it is encoded smaller and less often than the feed. At full size on
+# every frame it took 7.9 ms of the 33 ms budget on the thread feeding the
+# call, measured at 720p, and it took it with nothing watching: a window
+# hidden to the tray kept its stream open and WebView2 kept decoding it, 29
+# percent of a core for a picture nobody could see.
+PREVIEW_WIDTH = 640
+PREVIEW_FPS = 15
 
 
 class VideoPipeline:
@@ -53,6 +71,9 @@ class VideoPipeline:
         self._preview_lock = threading.Lock()
         self._preview: bytes | None = None
         self._preview_seq = 0
+        self._viewers = 0
+        self._preview_paused = False
+        self._preview_due = 0.0
 
         self._status_lock = threading.Lock()
         self._status = {
@@ -96,11 +117,33 @@ class VideoPipeline:
         with self._status_lock:
             out = dict(self._status)
         out["pedal"] = self.looper.status()
+        with self._preview_lock:
+            out["preview_viewers"] = self._viewers
         return out
 
     def preview_jpeg(self) -> bytes | None:
         with self._preview_lock:
             return self._preview
+
+    @contextmanager
+    def viewer(self):
+        """Keep the preview encoded for as long as the block runs."""
+        with self._preview_lock:
+            self._viewers += 1
+        try:
+            yield
+        finally:
+            with self._preview_lock:
+                self._viewers -= 1
+
+    def pause_preview(self, paused: bool) -> None:
+        """Stop encoding while the window showing the preview is out of sight.
+
+        The viewer count cannot tell: a window hidden to the tray keeps its
+        stream open, and to WebView2 the page is still visible.
+        """
+        with self._preview_lock:
+            self._preview_paused = paused
 
     # -- the chain -----------------------------------------------------
 
@@ -117,7 +160,7 @@ class VideoPipeline:
             return
 
         self.looper.fps = cfg.fps
-        cam = self._open_virtual_camera(cfg)
+        cam, to_camera = self._open_virtual_camera(cfg)
         self._set_status(
             running=True,
             camera=cfg.camera,
@@ -131,6 +174,19 @@ class VideoPipeline:
         # and the preview flip further down skips it.
         generated = backend in ("paused", "pattern")
 
+        # A camera paces the loop by itself: read() blocks until the next frame
+        # is there. A timer of our own on top of it was a second clock, and it
+        # cost twice. When the two drifted apart the loop waited on both, a 21
+        # ms sleep followed by a 29 ms wait for the frame the sleep had just
+        # missed going out as a 62 ms gap. When the loop ran late, frames queued
+        # behind the timer and stayed queued: 57 to 110 ms old when read, run to
+        # run, against 43 ms with the camera setting the pace. What the camera
+        # does not do is hand frames over evenly, so they go out on its own
+        # clock instead, see `_Playout`. Only a generated source needs a timer,
+        # and it gets time.sleep, because Event.wait rounds up to the 15.6 ms
+        # system tick unless something in the process has raised the timer
+        # resolution.
+        playout = None if generated else _Playout()
         period = 1.0 / max(1, cfg.fps)
         next_due = time.monotonic()
         ticks, window_start = 0, time.monotonic()
@@ -144,20 +200,31 @@ class VideoPipeline:
                 if not ok or frame is None:
                     time.sleep(0.01)
                     continue
+                arrived = time.perf_counter()
                 snap = self._link.get()
                 out = self.looper.process(frame)
                 out = self._degrader.apply(out, snap, cfg)
                 out = self._delayed(out, snap, cfg)
 
+                if playout is not None:
+                    stamp = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    if stamp > 0:
+                        # Bounded, so a camera whose clock jumps costs one frame
+                        # of waiting rather than a frozen feed.
+                        wait = playout.due(stamp / 1000.0, arrived) - time.perf_counter()
+                        if wait > 0:
+                            time.sleep(min(wait, period))
+
                 if cam is not None:
                     try:
-                        cam.send(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
+                        cam.send(cv2.cvtColor(out, to_camera))
                     except Exception as exc:  # the driver can vanish mid-run
                         log.warning("virtual camera send failed: %s", exc)
                         cam = None
                         self._set_status(virtual_camera=None, error=f"virtual camera lost: {exc}")
 
-                self._publish_preview(out, settings, generated)
+                if self._preview_wanted():
+                    self._publish_preview(out, settings, generated)
 
                 ticks += 1
                 now = time.monotonic()
@@ -165,12 +232,13 @@ class VideoPipeline:
                     self._set_status(fps=round(ticks / (now - window_start), 1))
                     ticks, window_start = 0, now
 
-                next_due += period
-                sleep = next_due - time.monotonic()
-                if sleep > 0:
-                    stop.wait(sleep)
-                else:
-                    next_due = time.monotonic()  # fell behind, do not spiral
+                if generated:
+                    next_due += period
+                    sleep = next_due - time.monotonic()
+                    if sleep > 0:
+                        time.sleep(sleep)
+                    else:
+                        next_due = time.monotonic()  # fell behind, do not spiral
         except Exception as exc:
             # Without this the thread dies, the status still reads error: None,
             # and the only sign is that the preview stopped moving. The
@@ -195,10 +263,26 @@ class VideoPipeline:
             return self._delay.popleft()
         return self._delay[0]
 
+    def _preview_wanted(self) -> bool:
+        """True when something is watching and the next preview frame is due."""
+        now = time.monotonic()
+        with self._preview_lock:
+            if self._viewers <= 0 or self._preview_paused or now < self._preview_due:
+                return False
+        # A little under the interval, so a 30 fps chain lands on every other
+        # frame instead of beating against the preview rate.
+        self._preview_due = now + 0.8 / PREVIEW_FPS
+        return True
+
     def _publish_preview(self, out: np.ndarray, settings, generated: bool) -> None:
         shown = out
         if self.looper.state is State.LOOP and settings.pedal.ghost:
             shown = self.looper.preview(out, settings.pedal.overlay)
+        h, w = shown.shape[:2]
+        if w > PREVIEW_WIDTH:
+            shown = cv2.resize(
+                shown, (PREVIEW_WIDTH, round(h * PREVIEW_WIDTH / w)), interpolation=cv2.INTER_AREA
+            )
         # Before the annotation, or the status line comes out back to front.
         if settings.video.mirror and not generated:
             shown = cv2.flip(shown, 1)
@@ -211,19 +295,23 @@ class VideoPipeline:
             self._preview_seq += 1
 
     def _open_virtual_camera(self, cfg):
+        """The virtual camera and the conversion that feeds it, or (None, None)."""
         try:
             import pyvirtualcam
         except Exception as exc:
             self._set_status(error=f"pyvirtualcam missing: {exc}")
-            return None
+            return None, None
+        fmt, code = _camera_pixels(cfg.width, cfg.height)
         try:
-            return pyvirtualcam.Camera(
-                width=cfg.width, height=cfg.height, fps=cfg.fps, fmt=pyvirtualcam.PixelFormat.RGB
+            cam = pyvirtualcam.Camera(
+                width=cfg.width, height=cfg.height, fps=cfg.fps,
+                fmt=getattr(pyvirtualcam.PixelFormat, fmt),
             )
         except Exception as exc:
             log.warning("virtual camera unavailable, preview only: %s", exc)
             self._set_status(error=f"virtual camera unavailable: {exc}")
-            return None
+            return None, None
+        return cam, code
 
     def _set_status(self, **fields) -> None:
         with self._status_lock:
@@ -231,6 +319,51 @@ class VideoPipeline:
 
 
 # -- helpers ------------------------------------------------------------
+
+
+def _camera_pixels(width: int, height: int) -> tuple[str, int]:
+    """The pyvirtualcam pixel format to open with, and the cv2 conversion to it.
+
+    I420 rather than RGB. pyvirtualcam turns whatever it is handed into the
+    NV12 the OBS driver takes, and it does that holding the GIL: 5.5 ms a
+    frame from RGB, measured at 720p, during which neither audio callback can
+    run. OpenCV's I420 conversion releases the GIL and leaves pyvirtualcam a
+    copy of the planes, 0.27 ms. I420 needs both sides even, so an odd size
+    keeps RGB rather than refusing to start.
+    """
+    if width % 2 == 0 and height % 2 == 0:
+        return "I420", cv2.COLOR_BGR2YUV_I420
+    return "RGB", cv2.COLOR_BGR2RGB
+
+
+class _Playout:
+    """When a camera frame goes out: on the camera's clock, a steady delay behind it.
+
+    The camera stamps its frames exactly 33.3 ms apart and hands them over
+    anything from 16 to 49 ms apart (spacing p50 32, p95 49 ms, measured on
+    MSMF). Sent the moment they arrived, that unevenness went straight to the
+    far end, 6 to 16 gaps over 70 ms in 90 s where a steadier feed had 0 to
+    5. So each frame waits until its capture time plus the transit that 95 in
+    100 of the last two seconds of frames made within. That is the delay the
+    call pays, 60 ms measured on every run against 60 to 112 on the timer
+    this replaced, and the far end got 0 to 4 such gaps. A frame later than
+    that goes at once, so a backlog drains instead of settling in.
+
+    The stamp is `CAP_PROP_POS_MSEC`, which MSMF fills with the capture time.
+    Its clock does not have to be ours: the offset between the two rides
+    inside the transit.
+    """
+
+    WINDOW = 60  # frames, two seconds at 30 fps
+
+    def __init__(self) -> None:
+        self._transit: deque[float] = deque(maxlen=self.WINDOW)
+
+    def due(self, stamp: float, arrived: float) -> float:
+        """perf_counter time the frame stamped `stamp` should go out at."""
+        self._transit.append(arrived - stamp)
+        ranked = sorted(self._transit)
+        return stamp + ranked[int(0.95 * (len(ranked) - 1))]
 
 
 class _Paused:
@@ -368,19 +501,24 @@ def _open_camera(cfg):
 def _annotate(frame: np.ndarray, state: State, snap) -> np.ndarray:
     """Status line for the preview. Never reaches the virtual camera."""
     out = frame.copy()
+    # Laid out for a 1280-wide frame and scaled with it, with a floor so the
+    # smaller preview keeps a line that can still be read.
+    k = max(0.6, out.shape[1] / 1280.0)
+    weight = max(1, round(2 * k))
     label = state.value.upper()
     colour = {"live": (120, 220, 120), "rec": (80, 80, 255), "loop": (255, 200, 90)}[state.value]
-    cv2.putText(out, label, (16, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.8, colour, 2, cv2.LINE_AA)
+    cv2.putText(out, label, (round(16 * k), round(34 * k)), cv2.FONT_HERSHEY_SIMPLEX,
+                0.8 * k, colour, weight, cv2.LINE_AA)
     if snap.enabled:
         text = "STALL" if snap.stalled else f"link {snap.quality:.0f}"
         cv2.putText(
             out,
             text,
-            (16, 64),
+            (round(16 * k), round(64 * k)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
+            0.6 * k,
             (80, 80, 255) if snap.stalled else (200, 200, 200),
-            2,
+            weight,
             cv2.LINE_AA,
         )
     return out

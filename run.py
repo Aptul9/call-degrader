@@ -252,6 +252,7 @@ def _run_windowed(controller, args) -> int:
     def show() -> None:
         window.show()
         window.restore()
+        controller.preview_visible(True)
 
     def quit_app() -> None:
         quitting.set()
@@ -270,6 +271,11 @@ def _run_windowed(controller, args) -> int:
             if quitting.is_set():
                 return True
             window.hide()
+            # Hidden, the page keeps its stream open and WebView2 still counts
+            # it as visible, so it would go on being fed and decoding frames
+            # nobody can see: 29 percent of a core, measured. Minimising is
+            # caught by the page itself, which drops the stream.
+            controller.preview_visible(False)
             return False
 
         window.events.closing += on_closing

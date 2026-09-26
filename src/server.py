@@ -236,18 +236,23 @@ def _wav_bytes(samples: np.ndarray, rate: int) -> bytes:
 
 
 async def _frames(controller: Controller):
-    """MJPEG parts, at most one per preview refresh."""
-    last = None
-    while True:
-        jpeg = controller.video.preview_jpeg()
-        if jpeg is not None and jpeg is not last:
-            last = jpeg
-            yield (
-                f"--{BOUNDARY}\r\nContent-Type: image/jpeg\r\n"
-                f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
-                + jpeg
-                + b"\r\n"
-            )
-            await asyncio.sleep(1 / 30)
-        else:
-            await asyncio.sleep(0.02)
+    """MJPEG parts, at most one per preview refresh.
+
+    Counted as a viewer for as long as the response is open, because the video
+    thread only encodes a preview while something is reading one.
+    """
+    with controller.video.viewer():
+        last = None
+        while True:
+            jpeg = controller.video.preview_jpeg()
+            if jpeg is not None and jpeg is not last:
+                last = jpeg
+                yield (
+                    f"--{BOUNDARY}\r\nContent-Type: image/jpeg\r\n"
+                    f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
+                    + jpeg
+                    + b"\r\n"
+                )
+                await asyncio.sleep(1 / 30)
+            else:
+                await asyncio.sleep(0.02)

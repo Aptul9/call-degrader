@@ -70,6 +70,12 @@ class Controller:
     def clear_loop(self) -> None:
         self.video.looper.clear()
 
+    # -- preview -------------------------------------------------------
+
+    def preview_visible(self, visible: bool) -> None:
+        """The window showing the preview went out of sight, or came back."""
+        self.video.pause_preview(not visible)
+
     # -- settings ------------------------------------------------------
 
     def patch(self, changes: dict) -> Settings:

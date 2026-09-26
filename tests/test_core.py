@@ -542,6 +542,186 @@ def test_banding_quantises_without_darkening():
     assert abs(int(out.mean()) - 200) < 32, "banding must not pull the picture dark"
 
 
+def test_the_preview_is_encoded_only_while_someone_watches():
+    """Nothing watching, nothing encoded.
+
+    The preview used to be encoded on every frame whatever became of it: 7.9
+    ms of the 33 ms budget on the thread that feeds the call, and with the
+    window hidden to the tray WebView2 went on decoding it for nobody.
+    """
+    from src.video import PREVIEW_FPS, VideoPipeline
+
+    pipe = VideoPipeline(SettingsStore(), None)
+    assert not pipe._preview_wanted(), "no viewer, no preview"
+    with pipe.viewer():
+        assert pipe._preview_wanted()
+        assert not pipe._preview_wanted(), f"more than {PREVIEW_FPS} previews a second"
+        pipe._preview_due = 0.0
+        pipe.pause_preview(True)
+        assert not pipe._preview_wanted(), "a window out of sight gets no preview"
+        pipe.pause_preview(False)
+        assert pipe._preview_wanted()
+    pipe._preview_due = 0.0
+    assert not pipe._preview_wanted(), "the viewer count has to come back down"
+    assert pipe.status()["preview_viewers"] == 0
+
+
+def test_the_preview_is_smaller_than_the_feed():
+    import cv2
+
+    from src.video import PREVIEW_WIDTH, VideoPipeline
+
+    class Link:
+        def get(self):
+            return snapshot(enabled=False)
+
+    store = SettingsStore()
+    pipe = VideoPipeline(store, Link())
+    pipe._publish_preview(frame(3, 1280, 720), store.get(), generated=False)
+    shown = cv2.imdecode(np.frombuffer(pipe.preview_jpeg(), np.uint8), cv2.IMREAD_COLOR)
+    assert shown.shape[:2] == (360, PREVIEW_WIDTH), f"preview came out {shown.shape[1]}x{shown.shape[0]}"
+
+
+def test_opencv_keeps_to_two_threads():
+    """The default pool spreads each call over every core and spins between calls.
+
+    On the camera path that was most of the app's CPU: 28.1 percent of a core
+    on the default against 15.9 on two threads, for 1 to 2 ms a frame more on
+    the effects.
+    """
+    import cv2
+
+    import src.video  # noqa: F401 - importing it is what sets the pool
+
+    assert cv2.getNumThreads() == 2, f"OpenCV is on {cv2.getNumThreads()} threads"
+
+
+def test_the_virtual_camera_is_fed_i420():
+    """RGB made pyvirtualcam convert while holding the GIL, 5.5 ms a frame.
+
+    Nothing else in the process could run for that long, the audio callbacks
+    included. OpenCV's I420 conversion lets go of the GIL and leaves
+    pyvirtualcam copying planes, 0.27 ms.
+    """
+    import cv2
+    import pyvirtualcam
+
+    from src.video import _camera_pixels
+
+    fmt, code = _camera_pixels(1280, 720)
+    assert fmt == "I420" and code == cv2.COLOR_BGR2YUV_I420
+    assert hasattr(pyvirtualcam.PixelFormat, fmt)
+    planes = cv2.cvtColor(frame(1, 1280, 720), code)
+    assert planes.shape == (1080, 1280), "a full luma plane and two quarter chroma planes"
+    assert _camera_pixels(1279, 720) == ("RGB", cv2.COLOR_BGR2RGB), \
+        "an odd side cannot be I420 and must still start"
+
+
+def test_a_camera_paces_the_loop_by_itself():
+    """No second clock on top of the camera's.
+
+    read() already blocks until the next frame is there. A timer of our own on
+    top of it cost twice: a 21 ms sleep followed by a 29 ms wait for the frame
+    it had just missed went out as a 62 ms gap, and frames that queued behind
+    the timer while the loop ran late stayed queued, 57 to 110 ms old when
+    read against 43 ms with the camera setting the pace. A generated source
+    returns at once and is the only one that still sleeps, on time.sleep:
+    Event.wait rounds up to the 15.6 ms system tick, 31.7 ms for 20 asked.
+    """
+    import threading
+    import types
+
+    from src import video as video_module
+    from src.config import VideoSettings
+
+    class Link:
+        def get(self):
+            return snapshot(enabled=False)
+
+    def timers(source: str, stamped: bool = False) -> tuple[int, list[float]]:
+        """Timed Event.wait calls, and every time.sleep, over twenty frames."""
+        store = SettingsStore(Settings(video=VideoSettings(source=source, width=64, height=36)))
+        pipe = video_module.VideoPipeline(store, Link())
+        waits: list[float] = []
+        sleeps: list[float] = []
+        frames = [0]
+
+        class Stop(threading.Event):
+            def wait(self, timeout=None):
+                if timeout is not None:
+                    waits.append(timeout)
+                return super().wait(0)
+
+        stop = Stop()
+
+        class Camera:
+            # MSMF stamps each frame with its capture time; DSHOW gives -1.
+            def read(self):
+                return True, np.zeros((36, 64, 3), dtype=np.uint8)
+
+            def get(self, prop):
+                return frames[0] * 1000.0 / 30.0 + 1.0 if stamped else -1.0
+
+            def release(self):
+                return None
+
+        process = pipe.looper.process
+
+        def counted(live):
+            frames[0] += 1
+            if frames[0] >= 20:
+                stop.set()
+            return process(live)
+
+        pipe.looper.process = counted
+        real_open, real_time = video_module._open_camera, video_module.time
+        video_module._open_camera = lambda cfg: (Camera(), "FAKE")
+        video_module.time = types.SimpleNamespace(
+            sleep=sleeps.append, monotonic=real_time.monotonic, perf_counter=real_time.perf_counter)
+        pipe._open_virtual_camera = lambda cfg: (None, None)
+        try:
+            pipe._run(stop)
+        finally:
+            video_module._open_camera, video_module.time = real_open, real_time
+        return len(waits), sleeps
+
+    assert timers("camera") == (0, []), "a camera source must never wait on a timer of its own"
+    waits, sleeps = timers("camera", stamped=True)
+    assert waits == 0 and sleeps, "a stamped camera frame waits for its playout time"
+    assert max(sleeps) <= 1 / 30 + 1e-9, "and never longer than a frame"
+    waits, sleeps = timers("pattern")
+    assert waits == 0, "a generated source must not pace itself on Event.wait"
+    assert sleeps, "a generated source returns at once and needs the timer"
+
+
+def test_camera_frames_go_out_on_the_camera_clock():
+    """Handed over unevenly, sent evenly.
+
+    The camera stamps frames 33.3 ms apart and MSMF hands them over anywhere
+    from 16 to 49 ms apart. Sent on arrival that reached the far end as 6 to
+    16 gaps over 70 ms in 90 s. Held to capture time plus the transit nearly
+    all frames make, they leave as evenly as they were captured, and a burst
+    of late frames does not raise the delay for the ones after it.
+    """
+    from src.video import _Playout
+
+    rng = np.random.default_rng(4)
+    playout = _Playout()
+    stamps = [i / 30.0 for i in range(300)]
+    offset = 1000.0  # the camera's clock need not be ours
+    due = []
+    for i, stamp in enumerate(stamps):
+        transit = 0.043 + rng.uniform(0.0, 0.018)  # 43 to 61 ms, as measured
+        if 150 <= i < 153:
+            transit += 0.1  # three frames held up by a stalled machine
+        due.append(playout.due(stamp, stamp + offset + transit))
+    spacing = [b - a for a, b in zip(due[60:150], due[61:150])]
+    assert max(spacing) - min(spacing) < 0.004, \
+        f"frames left {min(spacing) * 1000:.1f} to {max(spacing) * 1000:.1f} ms apart"
+    after = [d - s - offset for d, s in zip(due[160:], stamps[160:])]
+    assert max(after) < 0.062, f"the delay rose to {max(after) * 1000:.1f} ms after a late burst"
+
+
 def test_effect_weights_of_zero_disable_their_effect():
     from dataclasses import replace
 
@@ -693,6 +873,85 @@ def test_the_handover_queue_cannot_grow_into_latency():
         f"200 blocks in and none out left {standing} standing, {standing * 10} ms of it"
 
 
+def test_the_handover_queue_is_taken_back_down_to_its_target():
+    """Where the queue parked at start used to be the delay for the whole call.
+
+    Nothing ever took a standing surplus back out, so a queue that settled six
+    blocks deep kept 60 ms of extra delay under every word, measured on a run
+    that did exactly that. Fed and drained at the same rate, it has to come
+    back down to the target on its own.
+    """
+    store = SettingsStore()
+    n = store.get().audio.blocksize
+    pipe = audio.AudioPipeline(store, None)
+    for _ in range(7):
+        pipe._queue.put_nowait(np.full(n, 0.1, dtype=np.float32))
+    out = np.zeros((n, 1), dtype=np.float32)
+    for _ in range(audio.QUEUE_WINDOW * 12):
+        pipe._queue.put_nowait(np.full(n, 0.1, dtype=np.float32))
+        pipe._on_output(out, n, None, None)
+    standing = pipe._queue.qsize()
+    assert standing <= audio.QUEUE_TARGET + 1, f"{standing} blocks still standing"
+    assert pipe.status()["trimmed"] >= 5
+    assert pipe.status()["underruns"] == 0, "trimming must not dig below what the stream needs"
+
+
+def test_taking_a_block_out_does_not_click():
+    """The block taken out is crossfaded into the next, so the wave stays whole.
+
+    Dropping it outright joins two points a block apart in the waveform. On
+    this 220 Hz tone that measured a step of 0.60 where the tone's own largest
+    is 0.014, which is a click.
+    """
+    store = SettingsStore()
+    cfg = store.get().audio
+    n = cfg.blocksize
+    pipe = audio.AudioPipeline(store, None)
+    t = np.arange(n * 800) / cfg.samplerate
+    tone = (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    blocks = [tone[i * n:(i + 1) * n] for i in range(800)]
+    for b in blocks[:5]:
+        pipe._queue.put_nowait(b)
+    heard = []
+    out = np.zeros((n, 1), dtype=np.float32)
+    for b in blocks[5:]:
+        pipe._queue.put_nowait(b)
+        pipe._on_output(out, n, None, None)
+        heard.append(out[:, 0].copy())
+    assert pipe.status()["trimmed"] > 0, "the setup has to make it trim"
+    worst = float(np.abs(np.diff(np.concatenate(heard))).max())
+    natural = float(np.abs(np.diff(tone)).max())
+    assert worst <= natural * 1.5, f"a step of {worst:.4f} against the tone's own {natural:.4f}"
+
+
+def test_an_empty_queue_fades_out_instead_of_clicking():
+    """A machine that stalls empties the queue however deep it is kept.
+
+    Cutting from speech to digital silence clicks. The last block fades out
+    instead, silence follows, and the first block back fades in.
+    """
+    store = SettingsStore()
+    n = store.get().audio.blocksize
+    pipe = audio.AudioPipeline(store, None)
+    out = np.zeros((n, 1), dtype=np.float32)
+
+    pipe._queue.put_nowait(np.full(n, 0.5, dtype=np.float32))
+    pipe._on_output(out, n, None, None)
+    assert np.allclose(out[:, 0], 0.5)
+
+    pipe._on_output(out, n, None, None)
+    assert abs(float(out[0, 0]) - 0.5) < 0.01 and abs(float(out[-1, 0])) < 0.01, \
+        "the first empty block fades the last one out"
+    pipe._on_output(out, n, None, None)
+    assert np.abs(out).max() == 0.0, "then silence"
+
+    pipe._queue.put_nowait(np.full(n, 0.5, dtype=np.float32))
+    pipe._on_output(out, n, None, None)
+    assert abs(float(out[0, 0])) < 0.01 and abs(float(out[-1, 0]) - 0.5) < 0.01, \
+        "the first block back fades in"
+    assert pipe.status()["underruns"] == 2
+
+
 def test_both_streams_ask_for_the_low_latency_buffer():
     """sounddevice defaults to "high" and nothing used to override it.
 
@@ -789,8 +1048,8 @@ def test_the_cable_leads_with_the_host_api_that_is_not_slow():
     opens and `_start_stream` needs somewhere to fall through to.
     """
     assert audio.API_ORDER["output"][0] == "WASAPI"
-    assert audio.API_ORDER["input"][0] == "MME", \
-        "capture stays where it was measured, 20 ms against 22 is nothing to win"
+    assert audio.API_ORDER["input"][:2] == ("WASAPI", "MME"), \
+        "capture leads with WASAPI for its even cadence, with MME right behind it"
 
     # The WASAPI view carries more channels here, so only the host API order
     # can put it first: the tie-break below it would pick the other one.
@@ -806,6 +1065,42 @@ def test_the_cable_leads_with_the_host_api_that_is_not_slow():
     finally:
         audio.sd = real
     assert [i for i, _ in ranked] == [1, 0], "WASAPI first, MME kept behind it"
+
+
+def test_the_default_microphone_opens_on_wasapi_first():
+    """MME hands the microphone over two blocks at a time.
+
+    Measured on one microphone: MME callbacks came in pairs, spacing spread
+    10 ms, where WASAPI came one every 10 ms, spread 1 ms, for 2 ms more of
+    driver delay. Each host API's own default leads, WASAPI first, so it is
+    still the device the system means; nothing matched by name goes ahead.
+    """
+
+    class Fake:
+        devices = [
+            capture("Microphone Array (Intel Smart", channels=2, api=0),
+            capture("Microphone Array (Intel Smart Sound)", channels=2, api=1),
+            capture("Microphone Array (Other)", channels=2, api=1),
+        ]
+
+        class default:
+            device = [0, -1]
+
+        def query_hostapis(self):
+            return [{"name": "MME", "default_input_device": 0},
+                    {"name": "Windows WASAPI", "default_input_device": 1}]
+
+        def query_devices(self, index=None):
+            return self.devices if index is None else self.devices[index]
+
+    store = SettingsStore()
+    real, audio.sd = audio.sd, Fake()
+    try:
+        order = [i for i, _ in audio.AudioPipeline(store, None)._input_candidates(store.get().audio)]
+    finally:
+        audio.sd = real
+    assert order[:2] == [1, 0], f"WASAPI's default, then MME's, got {order}"
+    assert order[2:] == [2], "views sharing the name follow as fallbacks"
 
 
 def test_cable_output_refuses_the_capture_side():

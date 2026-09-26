@@ -1,8 +1,8 @@
 """Proof that the video chain does what it claims, against the real camera.
 
-Frames are pulled from the running app's preview stream, which is the same
-image the virtual camera is fed, and measured. Run it against an app already
-started with `python run.py`.
+Frames are pulled from the running app's preview stream, which is the image
+the virtual camera is fed scaled down to the preview size, and measured. Run
+it against an app already started with `python run.py`.
 
     python tests/test_video_path.py
 """

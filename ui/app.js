@@ -901,6 +901,21 @@ function abRefreshSoon() {
   }, 180);
 }
 
+// -- preview ----------------------------------------------------------------
+
+// The server only encodes a preview while a stream is open, so a page out of
+// sight lets go of its stream instead of having frames decoded for nobody. A
+// window hidden to the tray still reads as visible here; the app stops the
+// encoder itself for that one.
+function wirePreview() {
+  const img = $('preview');
+  const src = img.getAttribute('src');
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) img.removeAttribute('src');
+    else img.src = src;
+  });
+}
+
 // -- live status ----------------------------------------------------------
 
 function wireStatus() {
@@ -926,9 +941,11 @@ function paint(status) {
   setPill('pill-vcam', vcam ? short(vcam) : 'no virtual camera', vcam ? 'ok' : 'warn');
 
   const audio = status.audio || {};
-  // What the two drivers negotiated, so the floor under every delay is on
-  // screen rather than guessed at when the far end says there is a lag.
-  const lag = audio.latency_ms == null ? '' : `, ${Math.round(audio.latency_ms)} ms`;
+  // What the two drivers negotiated plus what is standing in the queue between
+  // them, so the floor under every delay is on screen rather than guessed at
+  // when the far end says there is a lag.
+  const lag = audio.latency_ms == null ? ''
+    : `, ${Math.round(audio.latency_ms + (audio.queue_ms || 0))} ms`;
   setPill('pill-audio', audio.running ? `audio ${audio.samplerate} Hz${lag}` : 'audio off',
           audio.running ? 'ok' : 'warn');
   $('meter-in').style.width = `${Math.min(100, (audio.level_in || 0) * 320)}%`;
@@ -972,6 +989,7 @@ function showError(message) {
   wirePedal();
   wireAudioTest();
   wireAbPlayer();
+  wirePreview();
   wireStatus();
   abRestore();
   $('hotkey-hint').textContent =
