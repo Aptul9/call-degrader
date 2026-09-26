@@ -10,10 +10,12 @@ get two streams and a queue between them rather than one duplex stream. The
 degradation runs in the input callback, where the block already is; it is a few
 hundred microseconds of numpy on 480 samples and does not justify a third hop.
 
-Device selection follows what was already proven on this machine in
-ever-spammer/calls/bridge.py: prefer the MME host API, because some indices
-resolve onto WDM-KS and fail with 'Unanticipated host error -9999', and never
-open more than two channels, which keeps the 16-channel VB-CABLE variants out.
+Device selection started from what was proven on this machine in
+ever-spammer/calls/bridge.py: MME before WDM-KS, because some indices resolve
+onto WDM-KS and fail with 'Unanticipated host error -9999', and never more than
+two channels open, which keeps the 16-channel VB-CABLE variants out. Both
+directions now lead with WASAPI, on measurement rather than inheritance: see
+`API_ORDER`.
 """
 
 from __future__ import annotations
@@ -62,16 +64,31 @@ log = logging.getLogger(__name__)
 # walk rather than a swap, because `_start_stream` falls through to the next
 # host API view of the same endpoint when one will not start.
 #
-# Input stays MME-first: it is what was proven for real capture devices,
-# Stereo Mix included, and there is nothing to win. The same microphone
-# measures 20 ms on MME against 22 ms on WASAPI, and opening the wrong device
-# costs more than 2 ms is worth. Reading back from CABLE Output is the one
-# case that needs DirectSound, and only the cable test does that; it passes
-# its own order rather than skewing the default for every microphone.
+# Input leads with WASAPI too since 2026-09-26, for the cadence rather than
+# the delay. The same microphone measures 20 ms on MME against 22 ms on
+# WASAPI, which is nothing, but MME hands its 10 ms blocks over in pairs, two
+# back to back every 20 ms (callback spacing spread 10 ms), where WASAPI
+# delivers one every 10 ms (spread 1 ms). The pairs are what the handover
+# queue had to stand deep for. MME stays right behind it, where Stereo Mix and
+# the other real capture devices were proven, and `_start_stream` falls
+# through to it when a WASAPI view will not start. Reading back from CABLE
+# Output is the one case that needs DirectSound, and only the cable test does
+# that; it passes its own order rather than skewing the default for every
+# microphone.
 API_ORDER = {
     "output": ("WASAPI", "MME", "DirectSound", "WDM-KS"),
-    "input": ("MME", "DirectSound", "WASAPI", "WDM-KS"),
+    "input": ("WASAPI", "MME", "DirectSound", "WDM-KS"),
 }
+
+# Blocks the handover queue may keep standing once the output side has taken
+# its own. One covers the jitter of two evenly clocked streams; whatever the
+# queue holds above that for a whole window is delay the call pays for
+# nothing, and `_settle` takes it back out a block at a time.
+QUEUE_TARGET = 1
+# Output callbacks per decision, half a second of 10 ms blocks. Long enough
+# that a burst is not mistaken for a surplus, short enough that the backlog a
+# stalled machine leaves behind drains in a few seconds.
+QUEUE_WINDOW = 50
 
 # Reading the far end of VB-CABLE: MME delivers silence, WASAPI will not open.
 CABLE_CAPTURE_APIS = ("DirectSound", "MME", "WASAPI", "WDM-KS")
@@ -198,6 +215,17 @@ def find_cable_outputs(match: str | None = None) -> list[tuple[int, dict]]:
     return found
 
 
+def host_api_settings(device: dict):
+    """Let WASAPI convert the sample rate rather than refuse it.
+
+    Shared mode only runs at the endpoint's own mix rate. Asked for anything
+    else the stream fails to start and the walk falls through to MME, which is
+    the slow host API the order above exists to avoid.
+    """
+    name = sd.query_hostapis(device["hostapi"])["name"]
+    return sd.WasapiSettings(auto_convert=True) if "WASAPI" in name else None
+
+
 def list_devices() -> dict:
     """Everything the UI needs to populate the two device pickers."""
     apis = sd.query_hostapis()
@@ -232,6 +260,14 @@ class AudioPipeline:
         # against the real blocksize; this is the 480-at-48k answer.
         self._ceiling = 8
 
+        # Output-side state for keeping the queue at its target and for
+        # covering an empty one without a click. Only `_on_output` touches it.
+        self._low: int | None = None
+        self._window = 0
+        self._block_ms = 10.0
+        self._last_out: np.ndarray | None = None
+        self._starved = False
+
         self._paused = False
         self._in_stream: sd.InputStream | None = None
         self._out_stream: sd.OutputStream | None = None
@@ -257,6 +293,10 @@ class AudioPipeline:
             "level_in": 0.0,
             "level_out": 0.0,
             "underruns": 0,
+            # Delay standing in the handover queue, and blocks taken out of it
+            # to bring it back to target.
+            "queue_ms": 0.0,
+            "trimmed": 0,
             "error": None,
         }
 
@@ -303,6 +343,9 @@ class AudioPipeline:
         self._ceiling = max(4, int(0.08 * rate / max(1, cfg.blocksize)))
         with self._queue.mutex:
             self._queue.queue.clear()
+        self._low, self._window = None, 0
+        self._block_ms = 1000.0 * cfg.blocksize / rate
+        self._last_out, self._starved = None, False
 
         out_idx, out_dev, self._out_stream = self._start_stream(
             "output",
@@ -314,6 +357,7 @@ class AudioPipeline:
                 dtype="float32",
                 device=index,
                 latency=cfg.latency,
+                extra_settings=host_api_settings(device),
                 callback=self._on_output,
             ),
         )
@@ -337,6 +381,7 @@ class AudioPipeline:
                     dtype="float32",
                     device=index,
                     latency=cfg.latency,
+                    extra_settings=host_api_settings(device),
                     callback=self._on_input,
                 ),
             )
@@ -359,23 +404,34 @@ class AudioPipeline:
         """Microphone views to try, in order.
 
         A device asked for by name is ranked by host API like anything else.
-        The default one is not: `sd.default.device[0]` is the only handle
-        certain to be the microphone the system means, and another host API
-        view of a similar name can be a different device altogether. It leads,
-        and the views sharing its name follow as fallbacks.
+        The default one is not matched by name, because another host API view
+        of a similar name can be a different device altogether. Each host API
+        reports its own view of the system default instead, and those are the
+        only handles certain to be the microphone the system means, so they
+        lead, in `API_ORDER`, and the views sharing the name follow as
+        fallbacks.
         """
         if cfg.input_device:
             return find_devices(cfg.input_device, "input")
-        index = sd.default.device[0]
-        device = sd.query_devices(index)
-        stem = device["name"].split("(")[0].strip()
+        apis = sd.query_hostapis()
+        leads: list[tuple[int, dict]] = []
+        for wanted in API_ORDER["input"]:
+            for api in apis:
+                index = api.get("default_input_device", -1)
+                if wanted in api["name"] and index >= 0 and all(index != i for i, _ in leads):
+                    leads.append((index, sd.query_devices(index)))
+        if not leads:
+            index = sd.default.device[0]
+            leads = [(index, sd.query_devices(index))]
+        taken = {i for i, _ in leads}
+        stem = leads[0][1]["name"].split("(")[0].strip()
         rest: list[tuple[int, dict]] = []
         if stem:
             try:
-                rest = [c for c in find_devices(stem, "input") if c[0] != index]
+                rest = [c for c in find_devices(stem, "input") if c[0] not in taken]
             except RuntimeError:
                 rest = []
-        return [(index, device), *rest]
+        return [*leads, *rest]
 
     def _start_stream(self, kind: str, candidates, build):
         """Open and start the first candidate that will take it.
@@ -596,15 +652,72 @@ class AudioPipeline:
         try:
             block = self._queue.get_nowait()
         except queue.Empty:
-            outdata.fill(0.0)
             self._status["underruns"] += 1
+            self._conceal(outdata, frames)
             return
-        if len(block) < frames:
-            block = np.pad(block, (0, frames - len(block)))
-        outdata[:] = block[:frames, None]
+        block = self._settle(block)
+        if self._starved:
+            # The first block after a gap fades in, or the restart clicks.
+            block = block * np.linspace(0.0, 1.0, len(block), dtype=np.float32)
+            self._starved = False
+        self._last_out = block
+        _write(outdata, frames, block)
+
+    def _settle(self, block: np.ndarray) -> np.ndarray:
+        """Take the queue back down to its target once it has stood above it.
+
+        The queue has to absorb bursts: two devices on two clocks, and an MME
+        microphone hands its blocks over in pairs. What it must not keep is a
+        standing surplus, and nothing ever took one back: wherever the queue
+        parked at start set the delay for the rest of the call, anywhere from
+        10 to 80 ms on top of the drivers, 60 to 70 ms in one measured run.
+        The lowest depth over a window is the part of the queue no burst
+        needed. While that stays above the target, one block comes out per
+        window, crossfaded into the next so the join does not click.
+        """
+        depth = self._queue.qsize()
+        self._low = depth if self._low is None else min(self._low, depth)
+        self._window += 1
+        self._set(queue_ms=round(depth * self._block_ms, 1))
+        if self._window < QUEUE_WINDOW:
+            return block
+        surplus = self._low > QUEUE_TARGET
+        self._low, self._window = None, 0
+        if not surplus:
+            return block
+        try:
+            nxt = self._queue.get_nowait()
+        except queue.Empty:
+            return block
+        self._status["trimmed"] += 1
+        n = min(len(block), len(nxt))
+        ramp = np.linspace(0.0, 1.0, n, dtype=np.float32)
+        return block[:n] * (1.0 - ramp) + nxt[:n] * ramp
+
+    def _conceal(self, outdata, frames: int) -> None:
+        """An empty queue fades the last block out instead of cutting to zero.
+
+        A cut from speech straight to digital silence is a click, and this
+        machine stalls every process for up to 130 ms at a time, which empties
+        the queue however deep it is kept. Silence follows the fade until the
+        queue refills, and the first block back fades in.
+        """
+        last, self._last_out = self._last_out, None
+        self._starved = True
+        if last is None:
+            outdata.fill(0.0)
+            return
+        _write(outdata, frames, last * np.linspace(1.0, 0.0, len(last), dtype=np.float32))
 
     def _set(self, **fields) -> None:
         self._status.update(fields)
+
+
+def _write(outdata, frames: int, block: np.ndarray) -> None:
+    """One mono block into however many channels the stream has."""
+    if len(block) < frames:
+        block = np.pad(block, (0, frames - len(block)))
+    outdata[:] = block[:frames, None]
 
 
 # -- default microphone routing ----------------------------------------
