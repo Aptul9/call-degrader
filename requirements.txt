@@ -10,3 +10,5 @@ pywebview==6.2.1
 # Tray icon, and the Pillow it needs is also what draws assets/icon.ico.
 pystray==0.19.5
 pillow>=11.0
+# Camera picker: lists DirectShow devices by name (src/video.py list_cameras).
+pygrabber==0.2
