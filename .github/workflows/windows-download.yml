@@ -1,0 +1,137 @@
+name: Windows download
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'run.py'
+      - 'src/**'
+      - 'ui/**'
+      - 'assets/**'
+      - 'requirements.txt'
+      - 'call-degrader.spec'
+      - 'tests/test_core.py'
+      - 'tools/package-windows.ps1'
+      - 'tools/test-windows-package.ps1'
+      - '.github/workflows/windows-download.yml'
+  pull_request:
+    paths:
+      - 'run.py'
+      - 'src/**'
+      - 'ui/**'
+      - 'assets/**'
+      - 'requirements.txt'
+      - 'call-degrader.spec'
+      - 'tests/test_core.py'
+      - 'tools/package-windows.ps1'
+      - 'tools/test-windows-package.ps1'
+      - '.github/workflows/windows-download.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-download-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Test and package the folder build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      - name: Dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Core tests
+        run: python tests/test_core.py
+
+      - name: Build
+        run: python -m PyInstaller --noconfirm --clean call-degrader.spec
+
+      - name: Build ZIP and JSON
+        run: ./tools/package-windows.ps1
+
+      - name: Start the extracted exe
+        run: ./tools/test-windows-package.ps1 -Archive ./.release/windows/CallDegrader-Windows-x64.zip
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: call-degrader-windows-x64
+          path: |
+            .release/windows/CallDegrader-Windows-x64.zip
+            .release/windows/CallDegrader-Windows-x64.json
+            .release/windows/SHA256SUMS.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  servizi:
+    name: Publish on servizi.everbright.it
+    needs: build
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # one upload at a time; a newer master waits instead of racing an older one
+    concurrency:
+      group: servizi-download-call-degrader
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: call-degrader-windows-x64
+          path: release
+
+      - name: Upload tested ZIP to the services page
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SSH_KEY: ${{ secrets.SERVIZI_DOWNLOAD_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.SERVIZI_KNOWN_HOSTS }}
+          TARGET: servizi@${{ secrets.SERVIZI_HOST }}
+          BASE: https://servizi.everbright.it/download
+          NAME: CallDegrader-Windows-x64
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum --check SHA256SUMS.txt
+          hash=$(cut -d' ' -f1 SHA256SUMS.txt)
+          test "$(jq -r .sha256 "$NAME.json")" = "$hash"
+          test "$(jq -r .commit "$NAME.json")" = "$GITHUB_SHA"
+          test "$(jq -r .file "$NAME.json")" = "$NAME.zip"
+          test "$(jq -r .bytes "$NAME.json")" = "$(stat -c %s "$NAME.zip")"
+          # a run that finishes after a newer one must not put the older build back
+          published=$(curl -fsS --max-time 30 "$BASE/$NAME.json" | jq -r .commit || true)
+          if [ -n "$published" ] && [ "$published" != "null" ]; then
+            status=$(gh api "repos/$GH_REPO/compare/$published...$GITHUB_SHA" --jq .status)
+            if [ "$status" = "behind" ]; then
+              echo "Published $published is newer; services download left unchanged."
+              exit 0
+            fi
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # the key's forced command (ricevi-build) only accepts "<name>.zip|exe|json <sha256>" with the file on stdin
+          ssh "$TARGET" "$NAME.zip $hash" < "$NAME.zip"
+          test "$(curl -fsS --max-time 120 "$BASE/$NAME.zip" | sha256sum | cut -d' ' -f1)" = "$hash"
+          # the JSON the products page reads goes last, so it never names a ZIP that is not there yet
+          meta=$(sha256sum "$NAME.json" | cut -d' ' -f1)
+          ssh "$TARGET" "$NAME.json $meta" < "$NAME.json"
+          test "$(curl -fsS --max-time 30 "$BASE/$NAME.json" | sha256sum | cut -d' ' -f1)" = "$meta"
+          echo "$BASE/$NAME.zip $hash"

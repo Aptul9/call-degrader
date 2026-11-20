@@ -12,7 +12,7 @@ Windows only. It writes into the OBS virtual camera and VB-CABLE, and both of th
 
 ## Download
 
-[**Latest release**](https://github.com/Aptul9/call-degrader/releases/latest) — a zip, no installer. Unzip it anywhere and run `call-degrader.exe`. It opens its own window and puts an icon in the tray; there is no console.
+[**Latest build**](https://servizi.everbright.it/download/CallDegrader-Windows-x64.zip), also on the [products page](https://servizi.everbright.it/prodotti/) — a zip, no installer. Unzip it anywhere and run `call-degrader\call-degrader.exe`. It opens its own window and puts an icon in the tray; there is no console. Older builds are on the [GitHub releases](https://github.com/Aptul9/call-degrader/releases).
 
 It is unsigned, so the first run gets *Windows protected your PC* — **More info**, then **Run anyway**.
 
@@ -181,6 +181,17 @@ The build does not remove VB-CABLE or the OBS registration. Those are installed 
 ```
 
 checks whatever is in `dist/`, and says so rather than failing when nothing is built yet. A build that succeeds is not a build that works: PyInstaller drops data files and dynamically imported modules without any error, and the usual result is a server that answers on `/` and 404s on the stylesheet, or an audio chain that never opens because the PortAudio DLL stayed behind.
+
+### The download
+
+```
+./tools/package-windows.ps1
+./tools/test-windows-package.ps1 -Archive ./.release/windows/CallDegrader-Windows-x64.zip
+```
+
+The first zips `dist/call-degrader/` with the readme and the licences into `.release/windows/CallDegrader-Windows-x64.zip`, one `call-degrader` folder inside, and writes `CallDegrader-Windows-x64.json` beside it: `{version, sha256, bytes, commit, file}`, with the version from `src/__init__.py`. The second extracts that zip into a new folder and starts the extracted exe on the test pattern with no audio, which is all a CI runner has, and checks the page, its data files and a running video chain.
+
+`.github/workflows/windows-download.yml` runs both on every pull request. On `master` it then uploads the zip and the JSON to `https://servizi.everbright.it/download/`, where the [products page](https://servizi.everbright.it/prodotti/) reads the JSON for its version line. The upload key is `call-degrader@github-actions` in `ci/chiavi-build.pub` of `Aptul9/everbright-servizi`; the repository secrets are `SERVIZI_DOWNLOAD_SSH_KEY`, `SERVIZI_HOST` and `SERVIZI_KNOWN_HOSTS`.
 
 ## Tests
 
