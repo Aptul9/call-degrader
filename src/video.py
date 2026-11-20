@@ -131,6 +131,13 @@ class VideoPipeline:
         # and the preview flip further down skips it.
         generated = backend in ("paused", "pattern")
 
+        # The size asked of the camera is a request, not a promise: MSMF has
+        # been seen to hand back 1920x1080 against a 1280x720 ask. The virtual
+        # camera rejects any frame that is not the size it was opened with, so
+        # every frame is brought to that size here. A width or height change
+        # restarts the pipeline, so the size is fixed for the life of a run.
+        size = (cfg.width, cfg.height)
+
         period = 1.0 / max(1, cfg.fps)
         next_due = time.monotonic()
         ticks, window_start = 0, time.monotonic()
@@ -144,6 +151,8 @@ class VideoPipeline:
                 if not ok or frame is None:
                     time.sleep(0.01)
                     continue
+                if frame.shape[1::-1] != size:
+                    frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
                 snap = self._link.get()
                 out = self.looper.process(frame)
                 out = self._degrader.apply(out, snap, cfg)
