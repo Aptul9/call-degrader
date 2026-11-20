@@ -7,6 +7,8 @@ fastapi==0.141.1
 uvicorn[standard]==0.53.0
 # Native window over the same server. WebView2 on Windows, so no bundled browser.
 pywebview==6.2.1
+# Names the cameras for the picker (DirectShow). Without it the list is empty and every poll logs a warning.
+pygrabber==0.2
 # Tray icon, and the Pillow it needs is also what draws assets/icon.ico.
 pystray==0.19.5
 pillow>=11.0
