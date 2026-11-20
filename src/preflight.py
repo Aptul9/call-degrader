@@ -86,8 +86,9 @@ def _virtual_camera() -> list[Finding]:
 
     fix = (
         "install OBS Studio, then from an elevated prompt run\n"
-        r"    %USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\virtualcam-install.bat"
-        "\n    (or use the official OBS installer, which does it in one step)"
+        r"    %USERPROFILE%\scoop\apps\obs-studio\current\core\win-dshow\data\virtualcam-install.bat"
+        "\n    (older OBS builds: current\\data\\obs-plugins\\win-dshow\\virtualcam-install.bat;"
+        "\n    or use the official OBS installer, which does it in one step)"
     )
     if len(missing) == 1:
         return [Finding(

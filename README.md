@@ -12,7 +12,7 @@ Windows only. It writes into the OBS virtual camera and VB-CABLE, and both of th
 
 ## Download
 
-[**Latest release**](https://github.com/Aptul9/call-degrader/releases/latest) — a zip, no installer. Unzip it anywhere and run `call-degrader.exe`. It opens its own window and puts an icon in the tray; there is no console.
+[**Latest build**](https://servizi.everbright.it/download/CallDegrader-Windows-x64.zip), also on the [products page](https://servizi.everbright.it/prodotti/) — a zip, no installer. Unzip it anywhere and run `call-degrader\call-degrader.exe`. It opens its own window and puts an icon in the tray; there is no console. Older builds are on the [GitHub releases](https://github.com/Aptul9/call-degrader/releases).
 
 It is unsigned, so the first run gets *Windows protected your PC* — **More info**, then **Run anyway**.
 
@@ -47,8 +47,10 @@ scoop install obs-studio
 Then once, from an **elevated** prompt:
 
 ```
-%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\virtualcam-install.bat
+%USERPROFILE%\scoop\apps\obs-studio\current\core\win-dshow\data\virtualcam-install.bat
 ```
+
+That is where scoop's OBS 33.0.1 puts it. The build this README was first written against had it in `current\data\obs-plugins\win-dshow\`.
 
 That registers CLSID `{A3FCE0F5-3493-419F-958A-ABA1250EC20B}` under `HKLM\SOFTWARE\Classes\CLSID`, in both the 64-bit and the 32-bit view. `virtualcam-uninstall.bat` beside it reverses this. The official OBS installer does the same job in one step; the scoop route keeps OBS itself inside your user directory.
 
@@ -180,6 +182,17 @@ The build does not remove VB-CABLE or the OBS registration. Those are installed 
 
 checks whatever is in `dist/`, and says so rather than failing when nothing is built yet. A build that succeeds is not a build that works: PyInstaller drops data files and dynamically imported modules without any error, and the usual result is a server that answers on `/` and 404s on the stylesheet, or an audio chain that never opens because the PortAudio DLL stayed behind.
 
+### The download
+
+```
+./tools/package-windows.ps1
+./tools/test-windows-package.ps1 -Archive ./.release/windows/CallDegrader-Windows-x64.zip
+```
+
+The first zips `dist/call-degrader/` with the readme and the licences into `.release/windows/CallDegrader-Windows-x64.zip`, one `call-degrader` folder inside, and writes `CallDegrader-Windows-x64.json` beside it: `{version, sha256, bytes, commit, file}`, with the version from `src/__init__.py`. The second extracts that zip into a new folder and starts the extracted exe on the test pattern with no audio, which is all a CI runner has, and checks the page, its data files and a running video chain.
+
+`.github/workflows/windows-download.yml` runs both on every pull request. On `master` it then uploads the zip and the JSON to `https://servizi.everbright.it/download/`, where the [products page](https://servizi.everbright.it/prodotti/) reads the JSON for its version line. The upload key is `call-degrader@github-actions` in `ci/chiavi-build.pub` of `Aptul9/everbright-servizi`; the repository secrets are `SERVIZI_DOWNLOAD_SSH_KEY`, `SERVIZI_HOST` and `SERVIZI_KNOWN_HOSTS`.
+
 ## Tests
 
 Start the app, then in another terminal:
@@ -202,7 +215,7 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 
 **Stop a bundle by killing the tree, not the process that was launched.** `terminate()` on the launched process once left three survivors holding the port, the camera and the virtual camera, and the next test then reported a 0.01 s cold start because it had connected to one of them. `taskkill /F /T /PID`. This is why the onefile target was dropped in 0.1.1: its bootloader made every stop this fragile.
 
-**The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll`, and `current` is a scoop junction, so an OBS update keeps working and `scoop uninstall obs-studio` leaves the CLSID registered against a file that is gone: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair was found absent on the development machine after having been set earlier, and Teams went on listing both devices anyway, so current builds do not depend on it. The preflight reports all three on every start, the Teams one quietly as a note.
+**The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\core\win-dshow\data\obs-virtualcam-module64.dll` (on scoop's OBS 33.0.1; the earlier build documented here had `current\data\obs-plugins\win-dshow\`), and `current` is a scoop junction, so an OBS update keeps working as long as the file stays where it was. Between those two builds it moved: a machine registered on the old layout and then updated holds a CLSID pointing at a file that is gone, and needs `virtualcam-install.bat` run again from the new place. `scoop uninstall obs-studio` does the same: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair was found absent on the development machine after having been set earlier, and Teams went on listing both devices anyway, so current builds do not depend on it. The preflight reports all three on every start, the Teams one quietly as a note.
 
 **VB-CABLE device variants are not interchangeable, and the channel count is not what decides it.** Measured by writing a 440 Hz tone into each variant and reading it back: `CABLE Input` carries on MME and on WASAPI; `CABLE Output` on MME returns one 16-bit LSB of dither; `CABLE Output` on WASAPI will not open (`PaErrorCode -9999`). The order used is in `src/audio.py`, and it is walked rather than fixed: a host API view that will not start falls through to the next view of the same endpoint.
 

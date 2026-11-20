@@ -282,6 +282,25 @@ def test_the_mirror_never_reaches_the_call():
         "flipping after the annotation writes the status line backwards"
 
 
+def test_a_camera_that_ignores_the_asked_size_still_feeds_the_call():
+    """The size asked of the camera is a request, and MSMF does not always honour it.
+
+    A webcam asked for 1280x720 answered 1920x1080, pyvirtualcam rejected the
+    first frame for not being the size it was opened with, and the chain
+    dropped the virtual camera for the rest of the run: the call showed
+    "Camera unavailable" while the preview kept moving.
+    """
+    import inspect
+
+    from src import video as video_module
+
+    body = inspect.getsource(video_module.VideoPipeline._run)
+    assert "size = (cfg.width, cfg.height)" in body
+    resize = body.index("cv2.resize(frame, size")
+    assert resize < body.index("self.looper.process(frame)"), \
+        "every frame has to reach the size the virtual camera was opened with before the chain sees it"
+
+
 def test_the_window_icon_is_an_ico_not_a_png():
     """A png here does not fail, it kills the process.
 
