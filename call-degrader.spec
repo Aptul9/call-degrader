@@ -2,9 +2,15 @@
 #
 #     pyinstaller call-degrader.spec
 #
-# produces dist/call-degrader/, a folder and a single process. A onefile
-# target sat beside it until 0.1.1; its bootloader ran the real application as
-# a child, so stopping the visible process left the app serving.
+# produces dist/call-degrader.exe, one file. It replaced the folder build in
+# 0.1.3: a folder unzipped from a download carries the Mark of the Web on
+# every file, and .NET Framework refuses to load Python.Runtime.dll from it,
+# so pywebview had no window to open. Onefile unpacks to a temp directory at
+# every launch, and files the app writes itself carry no mark.
+#
+# The bootloader runs the real application as a child. Until 0.1.1 that meant
+# ending the visible process left the child serving; run.py now has the child
+# exit with its parent (_die_with_bootloader).
 #
 # No console. The window is what the app is now, closing it is what stops it,
 # and the preflight report reaches the UI as a banner. Nothing is lost by
@@ -50,25 +56,15 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-# -- folder build ------------------------------------------------------
-
-exe_dir = EXE(
+EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="call-degrader",
     console=False,
     disable_windowed_traceback=False,
     icon="assets/icon.ico",
     upx=False,
-)
-
-COLLECT(
-    exe_dir,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    name="call-degrader",
 )

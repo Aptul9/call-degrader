@@ -29,7 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGETS = [
-    ("one folder", ROOT / "dist" / "call-degrader" / "call-degrader.exe", 8741),
+    ("one file", ROOT / "dist" / "call-degrader.exe", 8741),
 ]
 
 # Generous: a cold machine under load is a lot slower than this one.
@@ -120,8 +120,7 @@ def check_bundle(label: str, exe: Path, port: int) -> list[str]:
 
     proc, seconds = _boot(exe, port)
     base = f"http://127.0.0.1:{port}"
-    size = (sum(f.stat().st_size for f in exe.parent.rglob("*") if f.is_file())
-            if label == "one folder" else exe.stat().st_size)
+    size = exe.stat().st_size
     print(f"  {size / 1024 / 1024:.1f} MB, first HTTP 200 after {seconds:.2f}s")
 
     try:
@@ -201,19 +200,34 @@ def check_no_console(exe: Path, port: int) -> list[str]:
     return failures
 
 
+def _children(pid: int) -> set[int]:
+    """Direct children of a process. The onefile bootloader runs the app as one."""
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         f"(Get-CimInstance Win32_Process -Filter 'ParentProcessId={pid}').ProcessId"],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    return {int(line) for line in out.split() if line.isdigit()}
+
+
 def _windows_of(pid: int) -> list[int]:
-    """Visible top-level windows belonging to a process, by title."""
+    """Visible top-level windows of a process or its children, by title.
+
+    The children count because in the onefile build the launched process is
+    the bootloader and the window belongs to the application it started.
+    """
     import ctypes
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
     found: list[int] = []
+    pids = {pid} | _children(pid)
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def each(hwnd, _lparam):
         owner = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-        if owner.value == pid and user32.IsWindowVisible(hwnd):
+        if owner.value in pids and user32.IsWindowVisible(hwnd):
             length = user32.GetWindowTextLengthW(hwnd)
             if length:
                 buf = ctypes.create_unicode_buffer(length + 1)
@@ -356,9 +370,6 @@ def main() -> int:
         print(f"\n{label}: {exe.relative_to(ROOT)}")
         failures += check_bundle(label, exe, port)
 
-    # Once, on the folder build. The windowed path is the same code in both
-    # and the single file only wraps it, so running it twice buys nothing but
-    # another window in someone's face.
     failures += check_window(present[0][1], 8743)
     failures += check_no_console(present[0][1], 8751)
 

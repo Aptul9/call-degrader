@@ -12,7 +12,7 @@ Windows only. It writes into the OBS virtual camera and VB-CABLE, and both of th
 
 ## Download
 
-[**Latest build**](https://servizi.everbright.it/download/CallDegrader-Windows-x64.zip), also on the [products page](https://servizi.everbright.it/prodotti/) — a zip, no installer. Unzip it anywhere and run `call-degrader\call-degrader.exe`. It opens its own window and puts an icon in the tray; there is no console. Older builds are on the [GitHub releases](https://github.com/Aptul9/call-degrader/releases).
+[**Latest build**](https://servizi.everbright.it/download/CallDegrader-Windows-x64.exe), also on the [products page](https://servizi.everbright.it/prodotti/) — one exe, no installer, no zip. Put it anywhere and run it. It opens its own window and puts an icon in the tray; there is no console. Older builds are on the [GitHub releases](https://github.com/Aptul9/call-degrader/releases).
 
 It is unsigned, so the first run gets *Windows protected your PC* — **More info**, then **Run anyway**.
 
@@ -160,9 +160,11 @@ Every effect also has its own weight, and a weight of zero turns it off.
 .venv/Scripts/python.exe -m PyInstaller --noconfirm --clean call-degrader.spec
 ```
 
-One target, `dist/call-degrader/`: 181.8 MB, one process, first HTTP 200 after 1.82 s.
+One target, `dist/call-degrader.exe`: 73.8 MB, first HTTP 200 after 4.82 s.
 
-A single-file target existed until 0.1.1 and was dropped. PyInstaller onefile is a bootloader that unpacks the bundle to a temp directory and runs the real application as a child, so ending the visible task leaves the child serving, still holding the camera and the cable, with nothing on screen to say so. Measured: two processes, kill the parent, the survivor still answered HTTP 200. It also cost 4.13 s to first response against 1.82 s, and never improved, because it re-extracts every launch.
+It is a single file since 0.1.3, after a folder build from 0.1.1 to 0.1.2. The folder shipped as a zip, and a zip unpacked by Explorer marks every file with the Mark of the Web: .NET Framework then refuses `_internal\pythonnet\runtime\Python.Runtime.dll`, pywebview has no WinForms backend, and the exe dies on start with `Failed to resolve Python.Runtime.Loader.Initialize`. Onefile unpacks to a temp directory on every launch, and what the app writes there carries no mark.
+
+PyInstaller onefile is a bootloader that runs the real application as a child, and that is why it was dropped in 0.1.1: ending the visible task left the child serving, still holding the camera and the cable. `run.py` now has the child wait on its parent's handle and exit with it (`_die_with_bootloader`), and `tools/test-windows-package.ps1` ends the bootloader alone and checks the port goes quiet. The start stays slower than the folder's 1.82 s, because it re-extracts every launch.
 
 There is no console window. Closing it hides the window and leaves the chains running, as above, and the preflight report reaches the UI as a banner. Everything that would have gone to a terminal is appended to:
 
@@ -186,12 +188,12 @@ checks whatever is in `dist/`, and says so rather than failing when nothing is b
 
 ```
 ./tools/package-windows.ps1
-./tools/test-windows-package.ps1 -Archive ./.release/windows/CallDegrader-Windows-x64.zip
+./tools/test-windows-package.ps1 -Exe ./.release/windows/CallDegrader-Windows-x64.exe
 ```
 
-The first zips `dist/call-degrader/` with the readme and the licences into `.release/windows/CallDegrader-Windows-x64.zip`, one `call-degrader` folder inside, and writes `CallDegrader-Windows-x64.json` beside it: `{version, sha256, bytes, commit, file}`, with the version from `src/__init__.py`. The second extracts that zip into a new folder and starts the extracted exe on the test pattern with no audio, which is all a CI runner has, and checks the page, its data files and a running video chain.
+The first copies `dist/call-degrader.exe` to `.release/windows/CallDegrader-Windows-x64.exe` and writes `CallDegrader-Windows-x64.json` beside it: `{version, sha256, bytes, commit, file}`, with the version from `src/__init__.py`. The second copies that exe into a new folder with the Mark of the Web a browser gives it, starts it windowed, then on the test pattern with no audio, which is all a CI runner has, and checks the page, its data files, a running video chain, and that ending the bootloader ends the app.
 
-`.github/workflows/windows-download.yml` runs both on every pull request. On `master` it then uploads the zip and the JSON to `https://servizi.everbright.it/download/`, where the [products page](https://servizi.everbright.it/prodotti/) reads the JSON for its version line. The upload key is `call-degrader@github-actions` in `ci/chiavi-build.pub` of `Aptul9/everbright-servizi`; the repository secrets are `SERVIZI_DOWNLOAD_SSH_KEY`, `SERVIZI_HOST` and `SERVIZI_KNOWN_HOSTS`.
+`.github/workflows/windows-download.yml` runs both on every pull request. On `master` it then uploads the exe and the JSON to `https://servizi.everbright.it/download/`, where the [products page](https://servizi.everbright.it/prodotti/) reads the JSON for its version line. The upload key is `call-degrader@github-actions` in `ci/chiavi-build.pub` of `Aptul9/everbright-servizi`; the repository secrets are `SERVIZI_DOWNLOAD_SSH_KEY`, `SERVIZI_HOST` and `SERVIZI_KNOWN_HOSTS`.
 
 ## Tests
 
@@ -213,7 +215,7 @@ The two tone-based suites need the app started with `--mic "Stereo Mix"` and **a
 
 **The window icon must be a `.ico`, and a `.png` does not fail, it kills the process.** pywebview hands it to `System.Drawing.Icon`, which reads ICO only, on a .NET dispatcher thread. The `ArgumentException` never becomes a Python exception: the process exits with `0xE0434352`, no window, no traceback, nothing in the log past the audio chain. Every headless check passed on that build, because they all run `--no-window`. `tests/test_exe.py` now starts one windowed and waits past the eight seconds it took to die.
 
-**Stop a bundle by killing the tree, not the process that was launched.** `terminate()` on the launched process once left three survivors holding the port, the camera and the virtual camera, and the next test then reported a 0.01 s cold start because it had connected to one of them. `taskkill /F /T /PID`. This is why the onefile target was dropped in 0.1.1: its bootloader made every stop this fragile.
+**Stop a bundle by killing the tree, not the process that was launched.** `terminate()` on the launched process once left three survivors holding the port, the camera and the virtual camera, and the next test then reported a 0.01 s cold start because it had connected to one of them. `taskkill /F /T /PID`. The onefile bootloader made every stop this fragile, which got it dropped in 0.1.1; it came back in 0.1.3 with the child exiting alongside its parent.
 
 **The three installs are once per machine, but only two of them stay put.** VB-CABLE survives until it is uninstalled. The camera registration points at `%USERPROFILE%\scoop\apps\obs-studio\current\core\win-dshow\data\obs-virtualcam-module64.dll` (on scoop's OBS 33.0.1; the earlier build documented here had `current\data\obs-plugins\win-dshow\`), and `current` is a scoop junction, so an OBS update keeps working as long as the file stays where it was. Between those two builds it moved: a machine registered on the old layout and then updated holds a CLSID pointing at a file that is gone, and needs `virtualcam-install.bat` run again from the new place. `scoop uninstall obs-studio` does the same: the device still lists in every picker and fails to open. The Teams `EnableFrameServerMode` pair was found absent on the development machine after having been set earlier, and Teams went on listing both devices anyway, so current builds do not depend on it. The preflight reports all three on every start, the Teams one quietly as a note.
 
