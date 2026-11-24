@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   build:
-    name: Test and package the folder build
+    name: Test and package the exe
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
@@ -62,17 +62,17 @@ jobs:
       - name: Build
         run: python -m PyInstaller --noconfirm --clean call-degrader.spec
 
-      - name: Build ZIP and JSON
+      - name: Package exe and JSON
         run: ./tools/package-windows.ps1
 
-      - name: Start the extracted exe
-        run: ./tools/test-windows-package.ps1 -Archive ./.release/windows/CallDegrader-Windows-x64.zip
+      - name: Start the downloaded exe
+        run: ./tools/test-windows-package.ps1 -Exe ./.release/windows/CallDegrader-Windows-x64.exe
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: call-degrader-windows-x64
           path: |
-            .release/windows/CallDegrader-Windows-x64.zip
+            .release/windows/CallDegrader-Windows-x64.exe
             .release/windows/CallDegrader-Windows-x64.json
             .release/windows/SHA256SUMS.txt
           include-hidden-files: true
@@ -96,7 +96,7 @@ jobs:
           name: call-degrader-windows-x64
           path: release
 
-      - name: Upload tested ZIP to the services page
+      - name: Upload tested exe to the services page
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,8 +113,8 @@ jobs:
           hash=$(cut -d' ' -f1 SHA256SUMS.txt)
           test "$(jq -r .sha256 "$NAME.json")" = "$hash"
           test "$(jq -r .commit "$NAME.json")" = "$GITHUB_SHA"
-          test "$(jq -r .file "$NAME.json")" = "$NAME.zip"
-          test "$(jq -r .bytes "$NAME.json")" = "$(stat -c %s "$NAME.zip")"
+          test "$(jq -r .file "$NAME.json")" = "$NAME.exe"
+          test "$(jq -r .bytes "$NAME.json")" = "$(stat -c %s "$NAME.exe")"
           # a run that finishes after a newer one must not put the older build back
           published=$(curl -fsS --max-time 30 "$BASE/$NAME.json" | jq -r .commit || true)
           if [ -n "$published" ] && [ "$published" != "null" ]; then
@@ -128,10 +128,10 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           # the key's forced command (ricevi-build) only accepts "<name>.zip|exe|json <sha256>" with the file on stdin
-          ssh "$TARGET" "$NAME.zip $hash" < "$NAME.zip"
-          test "$(curl -fsS --max-time 120 "$BASE/$NAME.zip" | sha256sum | cut -d' ' -f1)" = "$hash"
-          # the JSON the products page reads goes last, so it never names a ZIP that is not there yet
+          ssh "$TARGET" "$NAME.exe $hash" < "$NAME.exe"
+          test "$(curl -fsS --max-time 120 "$BASE/$NAME.exe" | sha256sum | cut -d' ' -f1)" = "$hash"
+          # the JSON the products page reads goes last, so it never names an exe that is not there yet
           meta=$(sha256sum "$NAME.json" | cut -d' ' -f1)
           ssh "$TARGET" "$NAME.json $meta" < "$NAME.json"
           test "$(curl -fsS --max-time 30 "$BASE/$NAME.json" | sha256sum | cut -d' ' -f1)" = "$meta"
-          echo "$BASE/$NAME.zip $hash"
+          echo "$BASE/$NAME.exe $hash"

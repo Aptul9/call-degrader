@@ -81,6 +81,46 @@ def _asset(name: str) -> Path | None:
     return path if path.exists() else None
 
 
+def _die_with_bootloader() -> None:
+    """In the single-file build, exit when the process that launched us does.
+
+    PyInstaller onefile is a bootloader: it unpacks the bundle to a temp
+    directory and runs the real application as a child. Ending the bootloader
+    from Task Manager does not end the child, which then goes on serving and
+    holding the camera and the cable with nothing on screen. That is why the
+    onefile target was dropped in 0.1.1. Waiting on the parent's handle and
+    leaving with it puts the two lifetimes back together.
+
+    Onefile is told apart from the folder build by where the bundle sits: the
+    folder build keeps it in `_internal` beside the exe, onefile in a temp
+    directory somewhere else.
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if not bundle or os.name != "nt":
+        return
+    if Path(bundle).resolve().parent == Path(sys.executable).resolve().parent:
+        return
+
+    import ctypes
+    import threading
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    SYNCHRONIZE = 0x00100000
+    handle = kernel32.OpenProcess(SYNCHRONIZE, False, os.getppid())
+    if not handle:
+        log.warning("cannot watch the bootloader (pid %s)", os.getppid())
+        return
+
+    def wait() -> None:
+        kernel32.WaitForSingleObject(ctypes.c_void_p(handle), 0xFFFFFFFF)
+        log.info("bootloader gone, exiting")
+        logging.shutdown()
+        os._exit(0)
+
+    threading.Thread(target=wait, name="bootloader", daemon=True).start()
+
+
 def _say(text: str) -> None:
     """For the things a terminal would show. Safe with no terminal."""
     for line in text.splitlines():
@@ -112,6 +152,7 @@ def main() -> int:
     args = parser.parse_args()
 
     logfile = _setup_output(args.verbose)
+    _die_with_bootloader()
 
     if args.check:
         return _check()
