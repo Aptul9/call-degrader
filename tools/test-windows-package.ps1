@@ -29,6 +29,22 @@ function Wait-Served([string]$base, $proc, [int]$tries = 240) {
     return $false
 }
 
+# CreateProcess, not ShellExecute: Start-Process on a file with the Mark of the Web gets the attachment manager's "Open
+# File - Security Warning" on Windows Server, a modal no CI runner ever answers. The mark still does what is under test,
+# since what .NET checks is the zone of the assembly it loads, not how the process was started.
+function Start-App([string]$exe, [string[]]$arguments) {
+    $info = [Diagnostics.ProcessStartInfo]::new($exe)
+    $info.UseShellExecute = $false
+    foreach ($a in $arguments) { $info.ArgumentList.Add($a) }
+    $p = [Diagnostics.Process]::Start($info)
+    $script:started += $p.Id
+    $p
+}
+
+function Get-Children([int]$id) {
+    @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$id" | ForEach-Object { [int]$_.ProcessId })
+}
+
 function Stop-Tree($proc) {
     if ($proc -and -not $proc.HasExited) { taskkill /F /T /PID $proc.Id | Out-Null }
     # the virtual camera is single-producer and the driver lets go of it a moment after the process
@@ -37,6 +53,8 @@ function Stop-Tree($proc) {
 
 $work = Join-Path ([IO.Path]::GetTempPath()) ('call-degrader-test-' + [guid]::NewGuid().ToString('N'))
 $proc = $null
+$started = @()
+$children = @()
 try {
     New-Item -ItemType Directory $work | Out-Null
     $copy = Join-Path $work ([IO.Path]::GetFileName($Exe))
@@ -44,17 +62,21 @@ try {
     Set-Content -LiteralPath $copy -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
 
     # windowed: the window comes from pywebview over pythonnet, which is what the Mark of the Web broke
-    $proc = Start-Process $copy -ArgumentList '--port', $Port, '--pattern', '--no-audio' -PassThru
+    $proc = Start-App $copy @('--port', $Port, '--pattern', '--no-audio')
     $base = "http://127.0.0.1:$Port"
     if (-not (Wait-Served $base $proc)) { throw "windowed: never served $base/ (exited: $($proc.HasExited))" }
+    "windowed: serving"
     Start-Sleep -Seconds 10
     if ($proc.HasExited) { throw "windowed: exited $($proc.ExitCode) after serving; see %LOCALAPPDATA%\call-degrader\call-degrader.log" }
+    "windowed: still up 10 s later"
+    $children += Get-Children $proc.Id
     Stop-Tree $proc
 
     $Port++
-    $proc = Start-Process $copy -ArgumentList '--port', $Port, '--no-window', '--pattern', '--no-audio' -PassThru
+    $proc = Start-App $copy @('--port', $Port, '--no-window', '--pattern', '--no-audio')
     $base = "http://127.0.0.1:$Port"
     if (-not (Wait-Served $base $proc)) { throw "the downloaded exe never served $base/ (exited: $($proc.HasExited))" }
+    "--no-window: serving"
 
     # the data files are what a bundle drops, and it drops them quietly
     if ((Invoke-WebRequest "$base/").Content -notmatch 'call-degrader') { throw 'index.html does not serve' }
@@ -68,8 +90,10 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if (-not $video.running) { throw "video chain not running: $($video.error)" }
+    "--no-window: video chain running"
 
     # the launched process is the bootloader; ending it alone has to end the app inside too
+    $children += Get-Children $proc.Id
     Stop-Process -Id $proc.Id -Force
     $gone = $false
     for ($i = 0; $i -lt 20; $i++) {
@@ -83,7 +107,8 @@ try {
 }
 finally {
     Stop-Tree $proc
-    Get-Process call-degrader -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$work*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    # by pid: on a runner %TEMP% is an 8.3 short path and a process reports its long one, so matching on the path misses
+    foreach ($id in $started + $children) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 }
